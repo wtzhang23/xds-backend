@@ -1,0 +1,1 @@
+This chart deploys an Envoy Gateway extension server for the XdsBackend custom BackendRef.
