@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -34,9 +35,14 @@ func main() {
 						Value: "0.0.0.0",
 					},
 					&cli.IntFlag{
-						Name:  "port",
-						Usage: "the port on which to listen",
+						Name:  "grpc-port",
+						Usage: "the port on which to listen for gRPC requests",
 						Value: 5005,
+					},
+					&cli.IntFlag{
+						Name:  "http-port",
+						Usage: "the port on which to listen for HTTP requests",
+						Value: 8080,
 					},
 					&cli.StringFlag{
 						Name:  "log-level",
@@ -60,6 +66,7 @@ func main() {
 }
 
 var grpcServer *grpc.Server
+var httpServer *http.Server
 
 func handleSignals(cCtx *cli.Context) error {
 	c := make(chan os.Signal, 1)
@@ -83,13 +90,13 @@ func startExtensionServer(cCtx *cli.Context) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: level,
 	}))
-	address := net.JoinHostPort(cCtx.String("host"), cCtx.String("port"))
+	grpcAddress := net.JoinHostPort(cCtx.String("host"), cCtx.String("grpc-port"))
 	cfg, err := config.ParseConfig(cCtx.String("config-file"))
 	if err != nil {
 		return err
 	}
-	logger.Info("Starting the extension server", slog.String("host", address))
-	lis, err := net.Listen("tcp", address)
+	logger.Info("Starting the extension server", slog.String("grpc-address", grpcAddress))
+	lis, err := net.Listen("tcp", grpcAddress)
 	if err != nil {
 		return err
 	}
@@ -100,7 +107,22 @@ func startExtensionServer(cCtx *cli.Context) error {
 		getConfigSources(cfg),
 		&handler.XdsBackendHandler{},
 	))
+	go startHTTPServer(cCtx)
 	return grpcServer.Serve(lis)
+}
+
+func startHTTPServer(cCtx *cli.Context) error {
+	httpAddress := net.JoinHostPort(cCtx.String("host"), cCtx.String("http-port"))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+	httpServer = &http.Server{
+		Addr:    httpAddress,
+		Handler: mux,
+	}
+	return httpServer.ListenAndServe()
 }
 
 func getConfigSources(cfg *v1alpha1.Config) map[string]types.XdsConfigSource {
