@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"time"
+	"strings"
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 )
 
 // ExtensionServerDeployer handles deployment of the extension server
@@ -18,6 +20,7 @@ type ExtensionServerDeployer struct {
 	k8sClient *K8sClient
 	settings  *cli.EnvSettings
 	cluster   *KindCluster
+	logger    testLogger
 }
 
 // NewExtensionServerDeployer creates a new ExtensionServerDeployer
@@ -33,7 +36,13 @@ func NewExtensionServerDeployer(kubeconfig string) (*ExtensionServerDeployer, er
 	return &ExtensionServerDeployer{
 		k8sClient: k8sClient,
 		settings:  settings,
+		logger:    defaultLogger,
 	}, nil
+}
+
+// SetLogger sets a custom logger for the deployer
+func (e *ExtensionServerDeployer) SetLogger(logger testLogger) {
+	e.logger = logger
 }
 
 // SetCluster sets the kind cluster for image loading
@@ -43,6 +52,7 @@ func (e *ExtensionServerDeployer) SetCluster(cluster *KindCluster) {
 
 // Deploy deploys the extension server using Helm
 func (e *ExtensionServerDeployer) Deploy(ctx context.Context, namespace string) error {
+	e.logger.Logf("[ExtensionServer] Deploying to %s...", namespace)
 	// Get the chart path - try to find project root
 	chartPath := filepath.Join("..", "..", "charts", "xds-backend")
 	if _, err := os.Stat(chartPath); os.IsNotExist(err) {
@@ -67,26 +77,10 @@ func (e *ExtensionServerDeployer) Deploy(ctx context.Context, namespace string) 
 		return fmt.Errorf("failed to create namespace: %w", err)
 	}
 
-	// Build and load the image into kind
-	imageRepo := "wtzhang23/xds-backend-extension-server"
-	imageTag := "e2e-test"
-	image := fmt.Sprintf("%s:%s", imageRepo, imageTag)
+	// Image is assumed to be pre-built
+	image := fmt.Sprintf("%s:%s", ExtensionServerImageRepo, ExtensionServerImageTag)
 
-	// Build the Docker image - find project root
-	projectRoot := filepath.Dir(filepath.Dir(chartPath))
-	dockerfilePath := filepath.Join(projectRoot, "Dockerfile")
-	if _, err := os.Stat(dockerfilePath); os.IsNotExist(err) {
-		return fmt.Errorf("dockerfile does not exist at: %s", dockerfilePath)
-	}
-
-	// Build Docker image (still using exec for now - could use docker client library)
-	cmd := exec.CommandContext(ctx, "docker", "build", "-t", image, "-f", dockerfilePath, projectRoot)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("failed to build Docker image: %w, output: %s", err, string(output))
-	}
-
-	// Load image into kind cluster
+	// Load image into kind cluster (if cluster is available)
 	if e.cluster != nil {
 		if err := e.cluster.LoadImage(ctx, image); err != nil {
 			return fmt.Errorf("failed to load image into kind: %w", err)
@@ -95,54 +89,57 @@ func (e *ExtensionServerDeployer) Deploy(ctx context.Context, namespace string) 
 
 	// Install using Helm
 	actionConfig := new(action.Configuration)
-	if err := actionConfig.Init(e.settings.RESTClientGetter(), namespace, "secret", func(format string, v ...interface{}) {}); err != nil {
+	// Use quiet Helm logger
+	if err := actionConfig.Init(e.settings.RESTClientGetter(), namespace, "secret", func(format string, v ...interface{}) {
+		msg := fmt.Sprintf(format, v...)
+		if strings.Contains(msg, "Error") || strings.Contains(msg, "Failed") ||
+			strings.Contains(msg, "Installing") || strings.Contains(msg, "installed") {
+			e.logger.Logf("[ExtensionServer] Helm: %s", msg)
+		}
+	}); err != nil {
 		return fmt.Errorf("failed to init helm action config: %w", err)
+	}
+
+	values := map[string]interface{}{
+		"image": map[string]interface{}{
+			"repository": ExtensionServerImageRepo,
+			"tag":        ExtensionServerImageTag,
+			"pullPolicy": ImagePullPolicy,
+		},
+		"logLevel": "debug",
 	}
 
 	// Check if release exists
 	histAction := action.NewHistory(actionConfig)
 	histAction.Max = 1
-	_, err = histAction.Run("xds-backend")
+	_, err := histAction.Run(ExtensionServerReleaseName)
 	if err == nil {
 		// Release exists, upgrade
+		e.logger.Log("[ExtensionServer] Upgrading release...")
 		upgradeAction := action.NewUpgrade(actionConfig)
 		upgradeAction.Namespace = namespace
 		upgradeAction.Wait = false
-		upgradeAction.Timeout = 5 * time.Minute
-
-		values := map[string]interface{}{
-			"image": map[string]interface{}{
-				"repository": imageRepo,
-				"tag":        imageTag,
-				"pullPolicy": "Never",
-			},
-		}
+		upgradeAction.Timeout = HelmTimeout
 
 		chart, err := loader.Load(chartPath)
 		if err != nil {
 			return fmt.Errorf("failed to load chart: %w", err)
 		}
 
-		_, err = upgradeAction.RunWithContext(ctx, "xds-backend", chart, values)
+		_, err = upgradeAction.RunWithContext(ctx, ExtensionServerReleaseName, chart, values)
 		if err != nil {
 			return fmt.Errorf("failed to upgrade extension server: %w", err)
 		}
+		e.logger.Log("[ExtensionServer] Upgraded")
 	} else {
 		// Install new release
+		e.logger.Log("[ExtensionServer] Installing...")
 		installAction := action.NewInstall(actionConfig)
-		installAction.ReleaseName = "xds-backend"
+		installAction.ReleaseName = ExtensionServerReleaseName
 		installAction.Namespace = namespace
 		installAction.CreateNamespace = true
 		installAction.Wait = false
-		installAction.Timeout = 5 * time.Minute
-
-		values := map[string]interface{}{
-			"image": map[string]interface{}{
-				"repository": imageRepo,
-				"tag":        imageTag,
-				"pullPolicy": "Never",
-			},
-		}
+		installAction.Timeout = HelmTimeout
 
 		chart, err := loader.Load(chartPath)
 		if err != nil {
@@ -153,6 +150,52 @@ func (e *ExtensionServerDeployer) Deploy(ctx context.Context, namespace string) 
 		if err != nil {
 			return fmt.Errorf("failed to install extension server: %w", err)
 		}
+		e.logger.Log("[ExtensionServer] Installed")
+	}
+
+	// Wait for Helm chart to be applied (resources created)
+	e.logger.Log("[ExtensionServer] Waiting for Helm chart to be applied...")
+	if err := e.WaitForChartApplied(ctx, namespace); err != nil {
+		return fmt.Errorf("failed to wait for Helm chart to be applied: %w", err)
+	}
+	e.logger.Log("[ExtensionServer] Helm chart applied successfully")
+
+	return nil
+}
+
+// WaitForChartApplied waits for the Helm chart resources to be created
+func (e *ExtensionServerDeployer) WaitForChartApplied(ctx context.Context, namespace string) error {
+	// Wait for the deployment to exist (this indicates the chart was applied)
+	// The deployment name follows the Helm fullname template: release-name-chart-name
+	// Since release name is "xds-backend" and chart name is "xds-backend",
+	// and release name contains chart name, the fullname is just "xds-backend"
+	deploymentName := ExtensionServerReleaseName
+
+	// Poll for deployment existence (not readiness - that's WaitForReady's job)
+	timeoutCtx, cancel := context.WithTimeout(ctx, DeploymentTimeout)
+	defer cancel()
+
+	err := wait.PollUntilContextTimeout(timeoutCtx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+
+		_, err := e.k8sClient.GetClientset().AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
+		if err != nil {
+			if errors.IsNotFound(err) {
+				// Deployment doesn't exist yet, keep polling
+				return false, nil
+			}
+			// Other error, return it
+			return false, err
+		}
+
+		// Deployment exists, chart was applied
+		return true, nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("deployment %s/%s not found within timeout %v: %w", namespace, deploymentName, DeploymentTimeout, err)
 	}
 
 	return nil
@@ -160,8 +203,14 @@ func (e *ExtensionServerDeployer) Deploy(ctx context.Context, namespace string) 
 
 // WaitForReady waits for the extension server to be ready
 func (e *ExtensionServerDeployer) WaitForReady(ctx context.Context, namespace string) error {
-	labelSelector := "app.kubernetes.io/name=xds-backend"
-	return e.k8sClient.WaitForPodsReady(ctx, namespace, labelSelector, TestTimeout)
+	e.logger.Log("[ExtensionServer] Waiting for extension server to be ready...")
+	err := e.k8sClient.WaitForPodsReady(ctx, namespace, ExtensionServerLabelSelector, TestTimeout)
+	if err != nil {
+		e.logger.Logf("[ExtensionServer] Extension server failed to become ready: %v", err)
+	} else {
+		e.logger.Log("[ExtensionServer] Extension server is ready!")
+	}
+	return err
 }
 
 // Uninstall uninstalls the extension server
@@ -172,7 +221,7 @@ func (e *ExtensionServerDeployer) Uninstall(ctx context.Context, namespace strin
 	}
 
 	uninstallAction := action.NewUninstall(actionConfig)
-	_, err := uninstallAction.Run("xds-backend")
+	_, err := uninstallAction.Run(ExtensionServerReleaseName)
 	if err != nil {
 		return fmt.Errorf("failed to uninstall extension server: %w", err)
 	}

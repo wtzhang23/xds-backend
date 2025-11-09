@@ -6,13 +6,21 @@ docker-build:
 	docker build -t $(IMAGE_REPO):$(IMAGE_TAG) .
 
 .PHONY: generate
-generate:
+generate: generate-proto generate-controller-gen
+
+.PHONY: generate-proto
+generate-proto:
 	go tool buf generate
+
+.PHONY: generate-controller-gen
+generate-controller-gen:
+	mkdir -p charts/xds-backend/crds
+	go tool controller-gen object crd paths="./api/..." output:crd:dir=./charts/xds-backend/crds
 
 .PHONY: buf-dep-update
 buf-dep-update:
 	go tool buf dep update
 
 .PHONY: test-e2e
-test-e2e:
+test-e2e: docker-build 
 	go test -v ./test/e2e/...

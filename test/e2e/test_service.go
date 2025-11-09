@@ -6,6 +6,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
@@ -78,7 +79,11 @@ func (d *TestServiceDeployer) Deploy(ctx context.Context, namespace, name string
 
 	_, err := d.k8sClient.GetClientset().AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create deployment: %w", err)
+		if errors.IsAlreadyExists(err) {
+			// Deployment already exists, continue
+		} else {
+			return fmt.Errorf("failed to create deployment: %w", err)
+		}
 	}
 
 	// Create service
@@ -104,7 +109,11 @@ func (d *TestServiceDeployer) Deploy(ctx context.Context, namespace, name string
 
 	_, err = d.k8sClient.GetClientset().CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to create service: %w", err)
+		if errors.IsAlreadyExists(err) {
+			// Service already exists, continue
+		} else {
+			return fmt.Errorf("failed to create service: %w", err)
+		}
 	}
 
 	return nil
