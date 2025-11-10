@@ -24,18 +24,13 @@ type TemplateData struct {
 	XdsBackendKind                 string
 	XdsBackendResourceName         string
 	EnvoyGatewayNamespace          string
-	XdsServerName                  string
 	TestServiceName                string
 	TestNamespace                  string
-	XdsServerFQDN                  string
-	XdsServerPort                  int
 	GatewayClassName               string
 	GatewayName                    string
 	HTTPRouteName                  string
 	GatewayListenerName            string
 	GatewayListenerPort            int
-	HTTPRoutePathMatchType         string
-	HTTPRoutePathMatchValue        string
 	ExtensionServerFQDN            string
 	ExtensionServerPort            int
 	ExtensionServerImageRepo       string
@@ -43,30 +38,10 @@ type TemplateData struct {
 	ImagePullPolicy                string
 	EnvoyGatewayContainerPort      int
 	EnvoyGatewayHTTPSContainerPort int
-	EnvoyBootstrapConfig           string // Pre-rendered bootstrap config
 	TestServicePort                int
-	GatewayClassControllerName     string
-	HostIP                         string // For xDS service exposer
-	XdsServiceName                 string // Name of the xDS service in Kubernetes
 	TestServiceIP                  string // IP address of the test service
 	EdsConfigPath                  string // Path to EDS config file in Envoy pod
 	EdsConfigMapName               string // Name of ConfigMap containing EDS config
-	EdsConfigContent               string // Content of EDS config file
-}
-
-// indent14 adds 14 spaces of indentation to each line of a string
-func indent14(s string) string {
-	return indent(s, 14)
-}
-
-// indent6 adds 6 spaces of indentation to each line of a string
-func indent6(s string) string {
-	return indent(s, 6)
-}
-
-// indent4 adds 4 spaces of indentation to each line of a string
-func indent4(s string) string {
-	return indent(s, 4)
 }
 
 // indent adds indentation to each line of a string
@@ -104,10 +79,7 @@ func LoadTemplate(templatePath string, data TemplateData) (string, error) {
 
 	// Parse the template with custom functions
 	funcMap := template.FuncMap{
-		"indent":   indent,
-		"indent14": indent14,
-		"indent6":  indent6,
-		"indent4":  indent4,
+		"indent": indent,
 	}
 	tmpl, err := template.New(templateName).Funcs(funcMap).Parse(string(templateBytes))
 	if err != nil {

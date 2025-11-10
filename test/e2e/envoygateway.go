@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"time"
 
 	"gopkg.in/yaml.v2"
 	"helm.sh/helm/v3/pkg/action"
@@ -18,23 +16,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
-
-// writeBootstrapConfig writes the bootstrap config to a file for debugging
-func writeBootstrapConfig(bootstrapConfig string) error {
-	// Get the directory of the current file (envoygateway.go)
-	_, callerFile, _, _ := runtime.Caller(0)
-	baseDir := filepath.Dir(callerFile)
-	renderedDir := filepath.Join(baseDir, ".rendered-configs")
-	if err := os.MkdirAll(renderedDir, 0755); err != nil {
-		return fmt.Errorf("failed to create rendered configs directory: %w", err)
-	}
-
-	timestamp := time.Now().Format("20060102-150405")
-	outputFilename := fmt.Sprintf("%s-envoy-bootstrap.json", timestamp)
-	outputPath := filepath.Join(renderedDir, outputFilename)
-
-	return os.WriteFile(outputPath, []byte(bootstrapConfig), 0644)
-}
 
 // EnvoyGatewayInstaller handles installation of Envoy Gateway
 type EnvoyGatewayInstaller struct {
@@ -78,9 +59,7 @@ func (e *EnvoyGatewayInstaller) SetLogger(logger testLogger) {
 
 // Install installs Envoy Gateway using Helm
 // extensionServerFQDN is the FQDN of the extension server (e.g., "xds-backend.xds-backend-system.svc.cluster.local:5005")
-// xdsServerFQDN is the FQDN of the xDS server (e.g., "xds-server.test-namespace.svc.cluster.local")
-// xdsServerPort is the port of the xDS server
-func (e *EnvoyGatewayInstaller) Install(ctx context.Context, extensionServerFQDN string, extensionServerPort int, xdsServerFQDN string, xdsServerPort int) error {
+func (e *EnvoyGatewayInstaller) Install(ctx context.Context, extensionServerFQDN string, extensionServerPort int) error {
 	e.logger.Log("[EnvoyGateway] Starting installation...")
 	// Create namespace if it doesn't exist
 	if err := e.k8sClient.CreateNamespace(ctx, EnvoyGatewayNamespace); err != nil {
@@ -173,11 +152,11 @@ func (e *EnvoyGatewayInstaller) Install(ctx context.Context, extensionServerFQDN
 		return fmt.Errorf("failed to load chart from %s: %w", chartPath, err)
 	}
 
-	return e.installChart(ctx, actionConfig, chart, chartPath, extensionServerFQDN, extensionServerPort, xdsServerFQDN, xdsServerPort)
+	return e.installChart(ctx, actionConfig, chart, chartPath, extensionServerFQDN, extensionServerPort)
 }
 
 // installChart performs the actual installation
-func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *action.Configuration, chart *chart.Chart, chartPath string, extensionServerFQDN string, extensionServerPort int, xdsServerFQDN string, xdsServerPort int) error {
+func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *action.Configuration, chart *chart.Chart, chartPath string, extensionServerFQDN string, extensionServerPort int) error {
 	// Load Helm values from template
 	valuesTemplateData := TemplateData{
 		XdsBackendGroup:                XdsBackendGroup,
@@ -238,72 +217,6 @@ func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *
 	}
 	e.logger.Log("[EnvoyGateway] Helm release 'eg' installed successfully")
 
-	return nil
-}
-
-// UpgradeWithEdsConfigMap upgrades the Envoy Gateway Helm release to mount the EDS ConfigMap
-func (e *EnvoyGatewayInstaller) UpgradeWithEdsConfigMap(ctx context.Context, extensionServerFQDN string, extensionServerPort int, edsConfigMapName string) error {
-	e.logger.Log("[EnvoyGateway] Upgrading Helm release to mount EDS ConfigMap...")
-
-	// Get Helm action configuration
-	actionConfig := new(action.Configuration)
-	if err := actionConfig.Init(e.settings.RESTClientGetter(), EnvoyGatewayNamespace, "secret", func(format string, v ...interface{}) {
-		msg := fmt.Sprintf(format, v...)
-		if strings.Contains(msg, "Error") || strings.Contains(msg, "Failed") ||
-			strings.Contains(msg, "Upgrading") || strings.Contains(msg, "upgraded") {
-			e.logger.Logf("[EnvoyGateway] Helm: %s", msg)
-		}
-	}); err != nil {
-		return fmt.Errorf("failed to init helm action config: %w", err)
-	}
-
-	// Set up registry client
-	registryClient, err := registry.NewClient(
-		registry.ClientOptDebug(false),
-		registry.ClientOptWriter(os.Stderr),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create registry client: %w", err)
-	}
-	actionConfig.RegistryClient = registryClient
-
-	// Load chart
-	chartPath := e.findExistingChart()
-	if chartPath == "" {
-		return fmt.Errorf("failed to find chart in %s", e.chartDir)
-	}
-	chart, err := loader.Load(chartPath)
-	if err != nil {
-		return fmt.Errorf("failed to load chart: %w", err)
-	}
-
-	// Load Helm values
-	valuesTemplateData := TemplateData{
-		XdsBackendGroup:                XdsBackendGroup,
-		XdsBackendAPIVersion:           XdsBackendAPIVersion,
-		ExtensionServerFQDN:            extensionServerFQDN,
-		ExtensionServerPort:            extensionServerPort,
-		EnvoyGatewayContainerPort:      EnvoyGatewayContainerPort,
-		EnvoyGatewayHTTPSContainerPort: EnvoyGatewayHTTPSContainerPort,
-	}
-	valuesTemplatePath := GetTemplatePath("envoy-gateway-values.yaml")
-	values, err := LoadHelmValues(valuesTemplatePath, valuesTemplateData)
-	if err != nil {
-		return fmt.Errorf("failed to load Helm values template: %w", err)
-	}
-
-	// Perform upgrade
-	upgradeAction := action.NewUpgrade(actionConfig)
-	upgradeAction.Namespace = EnvoyGatewayNamespace
-	upgradeAction.Wait = false
-	upgradeAction.Timeout = HelmTimeout
-
-	_, err = upgradeAction.RunWithContext(ctx, EnvoyGatewayReleaseName, chart, values)
-	if err != nil {
-		return fmt.Errorf("failed to upgrade Envoy Gateway: %w", err)
-	}
-
-	e.logger.Log("[EnvoyGateway] Helm release upgraded successfully")
 	return nil
 }
 

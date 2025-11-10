@@ -77,7 +77,3 @@ func (d *TestServiceDeployer) GetServiceAddress(namespace, name string) string {
 func (d *TestServiceDeployer) GetServiceClusterIP(ctx context.Context, namespace, name string) (string, error) {
 	return d.k8sClient.GetServiceClusterIP(ctx, namespace, name)
 }
-
-func int32Ptr(i int32) *int32 {
-	return &i
-}

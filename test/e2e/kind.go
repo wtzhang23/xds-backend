@@ -183,14 +183,6 @@ func (k *KindCluster) GetKubeconfigPath() string {
 }
 
 // LoadImage loads a Docker image into the kind cluster
-// NOTE: To avoid exec, use docker client library to save image, then kind library or docker load:
-//
-//	import "github.com/docker/docker/client"
-//	cli, _ := client.NewClientWithOpts(client.FromEnv)
-//	reader, _ := cli.ImageSave(ctx, []string{image})
-//	defer reader.Close()
-//	Then use kind library or docker load to import into cluster
-//
 // For now, we use exec as this would require docker client library dependency
 func (k *KindCluster) LoadImage(ctx context.Context, image string) error {
 	k.logger.Logf("[KindCluster] Loading Docker image %s into cluster %s...", image, k.name)

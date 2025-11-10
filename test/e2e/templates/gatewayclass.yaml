@@ -3,5 +3,5 @@ kind: GatewayClass
 metadata:
   name: {{ .GatewayClassName }}
 spec:
-  controllerName: {{ .GatewayClassControllerName }}
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
 

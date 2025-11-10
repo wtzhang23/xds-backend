@@ -24,8 +24,6 @@ const (
 	DeploymentTimeout = 2 * time.Minute
 	// StabilizeTimeout is the timeout for waiting for system pods to stabilize
 	StabilizeTimeout = 10 * time.Second
-	// WaitTimeout is the timeout for waiting operations
-	WaitTimeout = 10 * time.Second
 	// LogExtractionTimeout is the timeout for extracting logs
 	LogExtractionTimeout = 30 * time.Second
 	// ClusterReadyTimeout is the timeout for waiting for cluster to be ready
@@ -37,10 +35,6 @@ const (
 	ExtensionServerImageRepo = "wtzhang23/xds-backend-extension-server"
 	// ExtensionServerImageTag is the Docker image tag for the extension server
 	ExtensionServerImageTag = "latest"
-	// EnvoyGatewayImageRepo is the Docker image repository for Envoy Gateway
-	EnvoyGatewayImageRepo = "envoyproxy/gateway"
-	// EnvoyGatewayImageTag is the Docker image tag for Envoy Gateway
-	EnvoyGatewayImageTag = "latest"
 	// ImagePullPolicy is the image pull policy for test deployments
 	ImagePullPolicy = "Never"
 
@@ -58,12 +52,6 @@ const (
 	TestServiceName = "test-http-service"
 	// TestServicePort is the port for the test HTTP service
 	TestServicePort = 8080
-	// XdsServerPort is the port for the xDS server
-	XdsServerPort = 18000
-	// XdsServiceName is the name of the xDS service in Kubernetes
-	XdsServiceName = "xds-server"
-	// XdsServerName is the name identifier for the xDS server
-	XdsServerName = "test-xds-server"
 	// EnvoyGatewayHostPort is the host port for Envoy Gateway HTTP
 	EnvoyGatewayHostPort = 8080
 	// EnvoyGatewayContainerPort is the container port for Envoy Gateway HTTP
@@ -72,8 +60,6 @@ const (
 	EnvoyGatewayHTTPSHostPort = 8443
 	// EnvoyGatewayHTTPSContainerPort is the container port for Envoy Gateway HTTPS
 	EnvoyGatewayHTTPSContainerPort = 443
-	// PortForwardMapping is the port forward mapping string
-	PortForwardMapping = "8080:80"
 
 	// EnvoyGatewayChartPath is the OCI path for the Envoy Gateway Helm chart
 	EnvoyGatewayChartPath = "oci://docker.io/envoyproxy/gateway-helm"
@@ -100,8 +86,6 @@ const (
 	GatewayName = "eg"
 	// GatewayClassName is the name of the GatewayClass resource
 	GatewayClassName = "eg"
-	// GatewayClassControllerName is the controller name for Envoy Gateway GatewayClass
-	GatewayClassControllerName = "gateway.envoyproxy.io/gatewayclass-controller"
 	// HTTPRouteName is the name of the HTTPRoute resource
 	HTTPRouteName = "test-route"
 	// XdsBackendResourceName is the name of the XdsBackend resource
@@ -113,10 +97,6 @@ const (
 	GatewayListenerName = "http"
 	// GatewayListenerPort is the port number for the Gateway listener
 	GatewayListenerPort = 80
-	// HTTPRoutePathMatchType is the path match type for HTTPRoute
-	HTTPRoutePathMatchType = "PathPrefix"
-	// HTTPRoutePathMatchValue is the path match value for HTTPRoute
-	HTTPRoutePathMatchValue = "/"
 
 	// EnvoyAdminPort is the Envoy admin API port
 	EnvoyAdminPort = 19000

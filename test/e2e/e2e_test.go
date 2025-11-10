@@ -16,9 +16,7 @@ var (
 	cluster           *KindCluster
 	egInstaller       *EnvoyGatewayInstaller
 	extensionDeployer *ExtensionServerDeployer
-	xdsServer         *XdsServer
 	testService       *TestServiceDeployer
-	xdsServiceExposer *XdsServiceExposer
 )
 
 func TestE2E(t *testing.T) {
@@ -66,13 +64,6 @@ var _ = BeforeSuite(func() {
 	defaultLogger.Logf("  kubectl --kubeconfig %s get nodes", kubeconfigPath)
 	defaultLogger.Log("===========================\n")
 
-	// Set up xDS server and test service BEFORE deploying extension server
-	By("Setting up xDS server and test service")
-	defaultLogger.Logf("Starting xDS server on port %d...", XdsServerPort)
-	xdsServer = NewXdsServer(XdsServerPort)
-	Expect(xdsServer.Start(ctx)).To(Succeed())
-	defaultLogger.Logf("✓ xDS server started at %s", xdsServer.GetAddress())
-
 	// Deploy test HTTP service
 	defaultLogger.Logf("Deploying test HTTP service %s in namespace %s...", TestServiceName, TestNamespace)
 	testService, err = NewTestServiceDeployer(cluster.GetKubeconfigPath())
@@ -82,33 +73,7 @@ var _ = BeforeSuite(func() {
 	Expect(testService.WaitForReady(ctx, TestNamespace, TestServiceName)).To(Succeed())
 	defaultLogger.Log("✓ Test service is ready")
 
-	// Get the service endpoint
-	defaultLogger.Log("Getting test service cluster IP...")
-	serviceIP, err := testService.GetServiceClusterIP(ctx, TestNamespace, TestServiceName)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(serviceIP).NotTo(BeEmpty())
-	defaultLogger.Logf("✓ Test service cluster IP: %s", serviceIP)
-
-	// Configure xDS server with EDS endpoints pointing to the test service
-	defaultLogger.Logf("Configuring xDS server with EDS endpoints for service %s at %s:%d", TestServiceName, serviceIP, TestServicePort)
-	endpoints := []Endpoint{
-		{
-			Address: serviceIP,
-			Port:    TestServicePort,
-		},
-	}
-	Expect(xdsServer.SetEndpoints(TestServiceName, endpoints)).To(Succeed())
-	defaultLogger.Log("✓ xDS server configured with endpoints")
-
-	// Expose xDS server to the cluster via a Kubernetes service
-	defaultLogger.Logf("Exposing xDS server to cluster as service %s...", XdsServiceName)
-	xdsServiceExposer, err = NewXdsServiceExposer(cluster.GetKubeconfigPath(), TestNamespace, XdsServiceName, XdsServerPort)
-	Expect(err).NotTo(HaveOccurred())
-	xdsServiceAddress, err := xdsServiceExposer.Expose(ctx, xdsServer.GetAddress())
-	Expect(err).NotTo(HaveOccurred())
-	defaultLogger.Logf("✓ xDS server exposed at %s", xdsServiceAddress)
-
-	// Deploy extension server FIRST (before Envoy Gateway) with pre-configured xDS source
+	// Deploy extension server FIRST (before Envoy Gateway)
 	By("Deploying extension server")
 	defaultLogger.Logf("Deploying extension server in namespace: %s", ExtensionServerNamespace)
 	extensionDeployer, err = NewExtensionServerDeployer(cluster.GetKubeconfigPath())
@@ -121,7 +86,7 @@ var _ = BeforeSuite(func() {
 
 	defaultLogger.Log("Waiting for extension server pods to be ready...")
 	Expect(extensionDeployer.WaitForReady(ctx, ExtensionServerNamespace)).To(Succeed())
-	defaultLogger.Log("✓ Extension server is ready with xDS configuration")
+	defaultLogger.Log("✓ Extension server is ready")
 
 	// Install Envoy Gateway with extension server configuration
 	By("Installing Envoy Gateway")
@@ -134,11 +99,7 @@ var _ = BeforeSuite(func() {
 	extensionServerFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", ExtensionServerReleaseName, ExtensionServerNamespace)
 	defaultLogger.Logf("Configuring Envoy Gateway with extension server at %s:%d", extensionServerFQDN, ExtensionServerPort)
 
-	// Configure xDS server FQDN for EnvoyProxy bootstrap config
-	xdsServerFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", XdsServiceName, TestNamespace)
-	defaultLogger.Logf("Configuring EnvoyProxy with xDS server at %s:%d", xdsServerFQDN, XdsServerPort)
-
-	Expect(egInstaller.Install(ctx, extensionServerFQDN, ExtensionServerPort, xdsServerFQDN, XdsServerPort)).To(Succeed())
+	Expect(egInstaller.Install(ctx, extensionServerFQDN, ExtensionServerPort)).To(Succeed())
 	defaultLogger.Log("✓ Envoy Gateway Helm chart installed")
 
 	defaultLogger.Log("Waiting for Envoy Gateway pods to be ready...")
@@ -153,16 +114,6 @@ var _ = AfterSuite(func() {
 
 	if cancel != nil {
 		cancel()
-	}
-
-	// Clean up xDS service exposer
-	if xdsServiceExposer != nil {
-		_ = xdsServiceExposer.Cleanup(ctx)
-	}
-
-	// Stop xDS server
-	if xdsServer != nil {
-		xdsServer.Stop()
 	}
 
 	if cluster != nil {

@@ -56,17 +56,12 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Create EDS ConfigMap
-		edsConfigContent, err := LoadTemplate("eds-config.yaml", TemplateData{
-			TestServiceName: TestServiceName,
-			TestServiceIP:   testServiceIP,
-			TestServicePort: TestServicePort,
-		})
-		Expect(err).NotTo(HaveOccurred())
-
 		Expect(applyTemplate(ctx, k8sClient, "eds-configmap.yaml", TemplateData{
 			EdsConfigMapName:      EdsConfigMapName,
 			EnvoyGatewayNamespace: EnvoyGatewayNamespace,
-			EdsConfigContent:      edsConfigContent,
+			TestServiceName:       TestServiceName,
+			TestServiceIP:         testServiceIP,
+			TestServicePort:       TestServicePort,
 		})).To(Succeed())
 
 		// Create EnvoyProxy if CRD is available
@@ -86,8 +81,7 @@ var _ = Describe("xDS Backend Integration", func() {
 		gwc, err := k8sClient.GetGatewayClass(ctx, GatewayClassName)
 		if errors.IsNotFound(err) {
 			Expect(applyTemplate(ctx, k8sClient, "gatewayclass.yaml", TemplateData{
-				GatewayClassName:           GatewayClassName,
-				GatewayClassControllerName: GatewayClassControllerName,
+				GatewayClassName: GatewayClassName,
 			})).To(Succeed())
 			gwc, err = k8sClient.GetGatewayClass(ctx, GatewayClassName)
 			Expect(err).NotTo(HaveOccurred())
@@ -112,7 +106,7 @@ var _ = Describe("xDS Backend Integration", func() {
 						Name:      GatewayClassName,
 						Namespace: (*gatewayv1.Namespace)(ptrOf(EnvoyGatewayNamespace)),
 					}
-					_, err = k8sClient.GetGatewayClient().GatewayV1().GatewayClasses().Update(ctx, gwc, metav1.UpdateOptions{})
+					_, _ = k8sClient.GetGatewayClient().GatewayV1().GatewayClasses().Update(ctx, gwc, metav1.UpdateOptions{})
 				}
 			}
 		}
@@ -139,15 +133,13 @@ var _ = Describe("xDS Backend Integration", func() {
 		})).To(Succeed())
 
 		Expect(applyTemplate(ctx, k8sClient, "httproute.yaml", TemplateData{
-			HTTPRouteName:           HTTPRouteName,
-			TestNamespace:           TestNamespace,
-			GatewayName:             GatewayName,
-			EnvoyGatewayNamespace:   EnvoyGatewayNamespace,
-			HTTPRoutePathMatchType:  HTTPRoutePathMatchType,
-			HTTPRoutePathMatchValue: HTTPRoutePathMatchValue,
-			XdsBackendGroup:         XdsBackendGroup,
-			XdsBackendKind:          XdsBackendKind,
-			XdsBackendResourceName:  XdsBackendResourceName,
+			HTTPRouteName:          HTTPRouteName,
+			TestNamespace:          TestNamespace,
+			GatewayName:            GatewayName,
+			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
+			XdsBackendGroup:        XdsBackendGroup,
+			XdsBackendKind:         XdsBackendKind,
+			XdsBackendResourceName: XdsBackendResourceName,
 		})).To(Succeed())
 
 		// Wait for Gateway and HTTPRoute to be ready
@@ -276,7 +268,11 @@ func getEnvoyAdminConfigDump(ctx context.Context, k8sClient *K8sClient, namespac
 
 	go func() {
 		if err := fw.ForwardPorts(); err != nil {
-			errChan <- err
+			select {
+			case errChan <- err:
+			default:
+				// Error channel full or no listener, ignore to avoid blocking
+			}
 		}
 	}()
 	defer close(stopChan)
@@ -288,12 +284,12 @@ func getEnvoyAdminConfigDump(ctx context.Context, k8sClient *K8sClient, namespac
 	case err := <-errChan:
 		return "", fmt.Errorf("port forward error: %w", err)
 	case <-readyChan:
-		// Port forward ready, give it a moment to establish
-		time.Sleep(1 * time.Second)
+		// Give Envoy admin API a moment to be ready
+		time.Sleep(2 * time.Second)
 	}
 
 	adminURL := fmt.Sprintf("http://localhost:%d%s", EnvoyAdminPortForwardPort, adminPath)
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: HTTPClientTimeout}
 	resp, err := client.Get(adminURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to get config dump: %w", err)

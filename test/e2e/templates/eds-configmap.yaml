@@ -5,5 +5,15 @@ metadata:
   namespace: {{ .EnvoyGatewayNamespace }}
 data:
   eds-config.yaml: |
-{{ .EdsConfigContent | indent4 }}
+    version_info: "1"
+    resources:
+    - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
+      cluster_name: "{{ .TestServiceName }}"
+      endpoints:
+      - lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: "{{ .TestServiceIP }}"
+                port_value: {{ .TestServicePort }}
 

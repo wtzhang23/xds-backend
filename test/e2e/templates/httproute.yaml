@@ -10,8 +10,8 @@ spec:
   rules:
   - matches:
     - path:
-        type: {{ .HTTPRoutePathMatchType }}
-        value: {{ .HTTPRoutePathMatchValue }}
+        type: PathPrefix
+        value: /
     backendRefs:
     - group: {{ .XdsBackendGroup }}
       kind: {{ .XdsBackendKind }}
