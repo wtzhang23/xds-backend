@@ -1,6 +1,0 @@
-image:
-  repository: {{ .ExtensionServerImageRepo }}
-  tag: {{ .ExtensionServerImageTag }}
-  pullPolicy: {{ .ImagePullPolicy }}
-logLevel: debug
-
