@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"net/http"
@@ -10,11 +11,8 @@ import (
 
 	pb "github.com/envoyproxy/gateway/proto/extension"
 	"github.com/urfave/cli"
-	"github.com/wtzhang23/xds-backend/internal/config"
 	"github.com/wtzhang23/xds-backend/internal/handler"
 	"github.com/wtzhang23/xds-backend/pkg/server"
-	"github.com/wtzhang23/xds-backend/pkg/types"
-	"github.com/wtzhang23/xds-backend/proto/v1alpha1"
 	"google.golang.org/grpc"
 )
 
@@ -48,12 +46,6 @@ func main() {
 						Name:  "log-level",
 						Usage: "the log level, should be one of Debug/Info/Warn/Error",
 						Value: slog.LevelInfo.String(),
-					},
-					&cli.StringFlag{
-						Name:      "config-file",
-						Usage:     "the path to the config file",
-						Value:     "config.yaml",
-						TakesFile: true,
 					},
 				},
 			},
@@ -91,30 +83,34 @@ func startExtensionServer(cCtx *cli.Context) error {
 		Level: level,
 	}))
 	grpcAddress := net.JoinHostPort(cCtx.String("host"), cCtx.String("grpc-port"))
-	cfg, err := config.ParseConfig(cCtx.String("config-file"))
-	if err != nil {
-		return err
-	}
 	logger.Info("Starting the extension server", slog.String("grpc-address", grpcAddress))
 	lis, err := net.Listen("tcp", grpcAddress)
 	if err != nil {
 		return err
 	}
 	var opts []grpc.ServerOption
+	// add logging interceptor for errors
+	opts = append(opts, grpc.UnaryInterceptor(func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		resp, err := handler(ctx, req)
+		if err != nil {
+			logger.Error("Error handling request", slog.String("method", info.FullMethod), slog.String("error", err.Error()))
+		}
+		return resp, err
+	}))
 	grpcServer = grpc.NewServer(opts...)
 	pb.RegisterEnvoyGatewayExtensionServer(grpcServer, server.NewServer(
 		logger,
-		getConfigSources(cfg),
 		&handler.XdsBackendHandler{},
 	))
-	go startHTTPServer(cCtx)
+	go startHTTPServer(cCtx, logger)
 	return grpcServer.Serve(lis)
 }
 
-func startHTTPServer(cCtx *cli.Context) error {
+func startHTTPServer(cCtx *cli.Context, log *slog.Logger) error {
 	httpAddress := net.JoinHostPort(cCtx.String("host"), cCtx.String("http-port"))
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		log.Debug("Healthz request received")
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
@@ -123,12 +119,4 @@ func startHTTPServer(cCtx *cli.Context) error {
 		Handler: mux,
 	}
 	return httpServer.ListenAndServe()
-}
-
-func getConfigSources(cfg *v1alpha1.Config) map[string]types.XdsConfigSource {
-	configSources := make(map[string]types.XdsConfigSource)
-	for _, source := range cfg.Sources {
-		configSources[source.Name] = source
-	}
-	return configSources
 }

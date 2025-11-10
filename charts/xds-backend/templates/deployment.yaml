@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "xds-backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "xds-backend.labels" . | nindent 4 }}
 spec:
@@ -40,6 +41,10 @@ spec:
           {{- end }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - server
+            - --log-level
+            - {{ .Values.logLevel }}
           ports:
             - name: http
               containerPort: {{ .Values.service.httpPort }}
@@ -59,14 +64,6 @@ spec:
           resources:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- with .Values.volumeMounts }}
-          volumeMounts:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
-      {{- with .Values.volumes }}
-      volumes:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

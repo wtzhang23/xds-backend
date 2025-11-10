@@ -19,21 +19,19 @@ type handlerKey struct {
 
 type Server struct {
 	pb.UnimplementedEnvoyGatewayExtensionServer
-	handlers      map[handlerKey]types.XdsBackendHandler
-	configSources map[string]types.XdsConfigSource
-	log           *slog.Logger
+	handlers map[handlerKey]types.XdsBackendHandler
+	log      *slog.Logger
 }
 
-func NewServer(log *slog.Logger, configSources map[string]types.XdsConfigSource, handlers ...types.XdsBackendHandler) *Server {
+func NewServer(log *slog.Logger, handlers ...types.XdsBackendHandler) *Server {
 	handlersMap := make(map[handlerKey]types.XdsBackendHandler)
 	for _, handler := range handlers {
 		key := handlerKey{kind: handler.Kind(), apiVersion: handler.ApiVersion()}
 		handlersMap[key] = handler
 	}
 	return &Server{
-		handlers:      handlersMap,
-		configSources: configSources,
-		log:           log,
+		handlers: handlersMap,
+		log:      log,
 	}
 }
 
@@ -56,50 +54,29 @@ func (s *Server) PostClusterModify(ctx context.Context, req *pb.PostClusterModif
 		key := handlerKey{kind: kind, apiVersion: apiVersion}
 		handler, ok := s.handlers[key]
 		if !ok {
-			return nil, status.Error(codes.NotFound, "handler not found")
+			s.log.DebugContext(ctx, "Handler not found", slog.String("kind", kind), slog.String("apiVersion", apiVersion))
+			continue
 		}
+		s.log.DebugContext(ctx, "Handler found", slog.String("kind", kind), slog.String("apiVersion", apiVersion))
 		backendConfig, err := handler.ParseBackendFromBytes(ext.GetUnstructuredBytes())
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to parse backend config from bytes: %v", err)
 		}
-		configSource, ok := s.configSources[backendConfig.XdsServerName()]
-		if !ok {
-			return nil, status.Error(codes.NotFound, "config source not found")
-		}
-		s.changeXdsOfCluster(ctx, cluster, backendConfig, configSource)
+		s.changeXdsOfCluster(ctx, cluster, backendConfig)
 	}
 	return &pb.PostClusterModifyResponse{
 		Cluster: cluster,
 	}, nil
 }
 
-func (s *Server) changeXdsOfCluster(ctx context.Context, cluster *clusterv3.Cluster, backendConfig types.XdsBackendConfig, configSource types.XdsConfigSource) {
-	s.log.DebugContext(ctx, "Configuring cluster to use EDS", slog.String("cluster", cluster.Name), slog.String("eds_service_name", backendConfig.EdsServiceName()), slog.String("xds_server_name", backendConfig.XdsServerName()))
-	cluster.Name = backendConfig.XdsServerName()
+func (s *Server) changeXdsOfCluster(ctx context.Context, cluster *clusterv3.Cluster, backendConfig types.XdsBackendConfig) {
+	s.log.DebugContext(ctx, "Configuring cluster to use EDS", slog.String("cluster", cluster.Name), slog.String("eds_service_name", backendConfig.EdsServiceName()))
 	cluster.ClusterDiscoveryType = &clusterv3.Cluster_Type{
 		Type: clusterv3.Cluster_EDS,
 	}
 	cluster.EdsClusterConfig = &clusterv3.Cluster_EdsClusterConfig{
 		ServiceName: backendConfig.EdsServiceName(),
-		EdsConfig:   configSource.GetConfigSource(),
+		EdsConfig:   backendConfig.GetConfigSource(),
 	}
-}
-
-func (s *Server) PostTranslateModify(ctx context.Context, req *pb.PostTranslateModifyRequest) (*pb.PostTranslateModifyResponse, error) {
-	s.log.DebugContext(ctx, "PostTranslateModify callback invoked", slog.Int("num_clusters", len(req.Clusters)))
-	clusters := req.Clusters
-	for _, configSource := range s.configSources {
-		cluster := configSource.GetCluster()
-		if cluster == nil {
-			continue
-		}
-		s.log.DebugContext(ctx, "Adding cluster", slog.String("cluster", cluster.Name))
-		clusters = append(clusters, cluster)
-	}
-	return &pb.PostTranslateModifyResponse{
-		Clusters:  clusters,
-		Secrets:   req.Secrets,
-		Listeners: req.Listeners,
-		Routes:    req.Routes,
-	}, nil
+	s.log.DebugContext(ctx, "Cluster configured for EDS", slog.String("cluster", cluster.Name), slog.String("eds_service_name", backendConfig.EdsServiceName()))
 }
