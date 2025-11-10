@@ -17,7 +17,6 @@ graph TB
         subgraph "User Resources"
             HTTPRoute[HTTPRoute<br/>with XdsBackend backendRef]
             XdsBackend[XdsBackend CRD<br/>Defines EDS config source]
-            EDSConfigMap[EDS ConfigMap<br/>Contains endpoint data]
         end
 
         subgraph "envoy-gateway-system namespace"
@@ -30,11 +29,17 @@ graph TB
         subgraph "xds-backend-system namespace"
             ExtensionServer[xds-backend Extension Server<br/>gRPC server on port 5005<br/>HTTP health on port 8080]
         end
-
-        subgraph "Backend Services"
-            TestService[Test Service<br/>Backend application]
-        end
     end
+
+    subgraph "External EDS Source"
+        ExternalEDS[External EDS Configuration<br/>File-based or Remote xDS Server]
+    end
+
+    subgraph "Backend Services"
+        BackendService[Backend Service<br/>Endpoints discovered via EDS]
+    end
+
+    Client[Client]
 
     %% User creates resources
     HTTPRoute -->|references| XdsBackend
@@ -51,23 +56,26 @@ graph TB
     
     %% Envoy configuration
     EGController -->|configures| EnvoyProxy
-    EDSConfigMap -->|mounted as file| EnvoyProxy
+    ExternalEDS -->|provides endpoint data| EnvoyProxy
     
     %% Traffic flow
-    Client[Client] -->|HTTP traffic| EnvoyProxy
-    EnvoyProxy -->|reads EDS from file| EDSConfigMap
-    EnvoyProxy -->|routes to endpoints| TestService
+    Client -->|HTTP traffic| EnvoyProxy
+    EnvoyProxy -->|discovers endpoints via EDS| BackendService
     
-    %% Styling
-    classDef userResource fill:#e1f5ff
-    classDef systemComponent fill:#fff4e1
-    classDef extension fill:#e8f5e9
-    classDef backend fill:#fce4ec
+    %% Styling - colors optimized for both light and dark modes
+    classDef userResource fill:#5b9bd5,stroke:#2e75b6,stroke-width:2px,color:#fff
+    classDef systemComponent fill:#ffc000,stroke:#bf9000,stroke-width:2px,color:#000
+    classDef extension fill:#70ad47,stroke:#507e32,stroke-width:2px,color:#fff
+    classDef external fill:#8b7d9b,stroke:#6b5d7b,stroke-width:2px,color:#fff
+    classDef backend fill:#c55aa6,stroke:#933d7a,stroke-width:2px,color:#fff
+    classDef client fill:#95a5a6,stroke:#7f8c8d,stroke-width:2px,color:#fff
     
-    class HTTPRoute,XdsBackend,EDSConfigMap userResource
+    class HTTPRoute,XdsBackend userResource
     class EGController,EnvoyProxy,Gateway,GatewayClass systemComponent
     class ExtensionServer extension
-    class TestService,Client backend
+    class ExternalEDS external
+    class BackendService backend
+    class Client client
 ```
 
 ### Component Details
@@ -83,10 +91,14 @@ graph TB
 
 4. **Envoy Proxy**: The data plane proxy that:
    - Receives configuration from the Envoy Gateway controller
-   - Reads EDS data from mounted ConfigMap files or remote xDS servers
-   - Routes traffic to backend endpoints
+   - Discovers backend endpoints via external EDS configuration (file-based or remote xDS server)
+   - Routes traffic to backend endpoints discovered through EDS
 
-5. **EDS ConfigMap**: Contains endpoint discovery data in Envoy's EDS format, mounted as a file in the Envoy proxy pod.
+5. **External EDS Source**: The endpoint discovery configuration source, which can be:
+   - A file-based source (e.g., ConfigMap mounted in the Envoy proxy pod)
+   - A remote xDS server (configured as a static cluster in Envoy's bootstrap)
+
+6. **Backend Service**: The target application service whose endpoints are dynamically discovered and managed through the external EDS configuration source.
 
 ## Quickstart Guide
 
