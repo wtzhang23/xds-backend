@@ -139,4 +139,11 @@ const (
 	LogDir = ".logs"
 	// LogTimestampFormat is the timestamp format for log filenames
 	LogTimestampFormat = "20060102-150405"
+
+	// EdsConfigMapName is the name of the ConfigMap containing EDS configuration
+	EdsConfigMapName = "eg-eds-config"
+	// EdsConfigPath is the path to the EDS config file in the Envoy pod
+	EdsConfigPath = "/etc/envoy/eds/eds-config.yaml"
+	// EnvoyProxyPodPort is the port that Envoy proxy listens on in the pod
+	EnvoyProxyPodPort = 10080
 )
