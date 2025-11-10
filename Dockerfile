@@ -12,7 +12,7 @@ RUN --mount=type=cache,target=/root/.cache/go-build --mount=type=cache,target=/g
     CGO_ENABLED=0  \
     GOOS=${TARGETOS} \
     GOARCH=${TARGETARCH} \
-    go build -o /bin/xds-backend-extension-server -ldflags "${GO_LDFLAGS}" cmd/xds-backend-extension-server/main.go
+    go build -o /bin/xds-backend-extension-server -ldflags "${GO_LDFLAGS}" ./cmd/xds-backend-extension-server
 
 FROM gcr.io/distroless/static-debian11
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/

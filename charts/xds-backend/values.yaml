@@ -73,6 +73,23 @@ service:
   httpPort: 8080
   metricsPort: 8081
 
+# Metrics configuration
+metrics:
+  # ServiceMonitor configuration for Prometheus Operator
+  # More information: https://github.com/prometheus-operator/prometheus-operator/blob/main/Documentation/api.md#servicemonitor
+  serviceMonitor:
+    # Enable ServiceMonitor creation
+    enabled: false
+    # Prometheus instance label selector
+    # This should match the label selector used by your Prometheus instance
+    prometheusInstance: ""
+    # Additional labels to add to the ServiceMonitor
+    labels: {}
+    # Scrape interval for metrics
+    interval: "30s"
+    # Scrape timeout for metrics
+    scrapeTimeout: "10s"
+
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
   # choice for the user. This also increases chances charts run on environments with little

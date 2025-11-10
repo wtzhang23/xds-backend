@@ -1,0 +1,29 @@
+{{- if .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "xds-backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "xds-backend.labels" . | nindent 4 }}
+    {{- if .Values.metrics.serviceMonitor.prometheusInstance }}
+    prometheus: {{ .Values.metrics.serviceMonitor.prometheusInstance }}
+    {{- end }}
+    {{- if .Values.metrics.serviceMonitor.labels }}
+    {{- toYaml .Values.metrics.serviceMonitor.labels | nindent 4 }}
+    {{- end }}
+spec:
+  jobLabel: {{ include "xds-backend.fullname" . }}
+  selector:
+    matchLabels:
+      {{- include "xds-backend.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+  - targetPort: metrics
+    path: "/metrics"
+    interval: {{ .Values.metrics.serviceMonitor.interval }}
+    scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+{{- end }}
+
