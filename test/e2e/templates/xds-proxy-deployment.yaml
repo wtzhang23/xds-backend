@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .XdsServiceName }}-proxy
+  namespace: {{ .TestNamespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .XdsServiceName }}-proxy
+  template:
+    metadata:
+      labels:
+        app: {{ .XdsServiceName }}-proxy
+    spec:
+      hostNetwork: true
+      containers:
+      - name: socat
+        image: alpine/socat:latest
+        args:
+        - TCP-LISTEN:{{ .XdsServerPort }},fork,reuseaddr
+        - TCP-CONNECT:127.0.0.1:{{ .XdsServerPort }}
+        ports:
+        - containerPort: {{ .XdsServerPort }}
+          protocol: TCP
+

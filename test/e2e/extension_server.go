@@ -100,19 +100,22 @@ func (e *ExtensionServerDeployer) Deploy(ctx context.Context, namespace string) 
 		return fmt.Errorf("failed to init helm action config: %w", err)
 	}
 
-	values := map[string]interface{}{
-		"image": map[string]interface{}{
-			"repository": ExtensionServerImageRepo,
-			"tag":        ExtensionServerImageTag,
-			"pullPolicy": ImagePullPolicy,
-		},
-		"logLevel": "debug",
+	// Load Helm values from template
+	valuesTemplateData := TemplateData{
+		ExtensionServerImageRepo: ExtensionServerImageRepo,
+		ExtensionServerImageTag:  ExtensionServerImageTag,
+		ImagePullPolicy:          ImagePullPolicy,
+	}
+	valuesTemplatePath := GetTemplatePath("extension-server-values.yaml")
+	values, err := LoadHelmValues(valuesTemplatePath, valuesTemplateData)
+	if err != nil {
+		return fmt.Errorf("failed to load Helm values template: %w", err)
 	}
 
 	// Check if release exists
 	histAction := action.NewHistory(actionConfig)
 	histAction.Max = 1
-	_, err := histAction.Run(ExtensionServerReleaseName)
+	_, err = histAction.Run(ExtensionServerReleaseName)
 	if err == nil {
 		// Release exists, upgrade
 		e.logger.Log("[ExtensionServer] Upgrading release...")

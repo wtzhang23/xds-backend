@@ -1,0 +1,16 @@
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: {{ .XdsServiceName }}-1
+  namespace: {{ .TestNamespace }}
+  labels:
+    kubernetes.io/service-name: {{ .XdsServiceName }}
+addressType: IPv4
+endpoints:
+- addresses:
+  - {{ .HostIP }}
+ports:
+- port: {{ .XdsServerPort }}
+  protocol: TCP
+  name: grpc
+

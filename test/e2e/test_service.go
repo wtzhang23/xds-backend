@@ -4,11 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // TestServiceDeployer handles deployment of a test HTTP service
@@ -34,85 +30,32 @@ func (d *TestServiceDeployer) Deploy(ctx context.Context, namespace, name string
 		return fmt.Errorf("failed to create namespace: %w", err)
 	}
 
-	// Create deployment
-	deployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: int32Ptr(1),
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": name,
-				},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": name,
-					},
-				},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "http-echo",
-							Image: "hashicorp/http-echo:latest",
-							Args: []string{
-								"-text",
-								"Hello from test service",
-								"-listen",
-								fmt.Sprintf(":%d", port),
-							},
-							Ports: []corev1.ContainerPort{
-								{
-									ContainerPort: int32(port),
-									Name:          "http",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
+	// Load deployment template
+	templateData := TemplateData{
+		TestServiceName: name,
+		TestNamespace:   namespace,
+		TestServicePort: port,
 	}
-
-	_, err := d.k8sClient.GetClientset().AppsV1().Deployments(namespace).Create(ctx, deployment, metav1.CreateOptions{})
+	deploymentTemplatePath := GetTemplatePath("test-service-deployment.yaml")
+	deploymentYaml, err := LoadTemplate(deploymentTemplatePath, templateData)
 	if err != nil {
-		if errors.IsAlreadyExists(err) {
-			// Deployment already exists, continue
-		} else {
-			return fmt.Errorf("failed to create deployment: %w", err)
+		return fmt.Errorf("failed to load deployment template: %w", err)
+	}
+	if err := d.k8sClient.ApplyYAML(ctx, deploymentYaml); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to apply deployment: %w", err)
 		}
 	}
 
-	// Create service
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Selector: map[string]string{
-				"app": name,
-			},
-			Ports: []corev1.ServicePort{
-				{
-					Port:       int32(port),
-					TargetPort: intstr.FromInt32(int32(port)),
-					Protocol:   corev1.ProtocolTCP,
-					Name:       "http",
-				},
-			},
-		},
-	}
-
-	_, err = d.k8sClient.GetClientset().CoreV1().Services(namespace).Create(ctx, service, metav1.CreateOptions{})
+	// Load service template
+	serviceTemplatePath := GetTemplatePath("test-service-service.yaml")
+	serviceYaml, err := LoadTemplate(serviceTemplatePath, templateData)
 	if err != nil {
-		if errors.IsAlreadyExists(err) {
-			// Service already exists, continue
-		} else {
-			return fmt.Errorf("failed to create service: %w", err)
+		return fmt.Errorf("failed to load service template: %w", err)
+	}
+	if err := d.k8sClient.ApplyYAML(ctx, serviceYaml); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("failed to apply service: %w", err)
 		}
 	}
 

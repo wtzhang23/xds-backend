@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v2"
 	"helm.sh/helm/v3/pkg/action"
@@ -16,6 +18,23 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// writeBootstrapConfig writes the bootstrap config to a file for debugging
+func writeBootstrapConfig(bootstrapConfig string) error {
+	// Get the directory of the current file (envoygateway.go)
+	_, callerFile, _, _ := runtime.Caller(0)
+	baseDir := filepath.Dir(callerFile)
+	renderedDir := filepath.Join(baseDir, ".rendered-configs")
+	if err := os.MkdirAll(renderedDir, 0755); err != nil {
+		return fmt.Errorf("failed to create rendered configs directory: %w", err)
+	}
+
+	timestamp := time.Now().Format("20060102-150405")
+	outputFilename := fmt.Sprintf("%s-envoy-bootstrap.json", timestamp)
+	outputPath := filepath.Join(renderedDir, outputFilename)
+
+	return os.WriteFile(outputPath, []byte(bootstrapConfig), 0644)
+}
 
 // EnvoyGatewayInstaller handles installation of Envoy Gateway
 type EnvoyGatewayInstaller struct {
@@ -159,119 +178,28 @@ func (e *EnvoyGatewayInstaller) Install(ctx context.Context, extensionServerFQDN
 
 // installChart performs the actual installation
 func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *action.Configuration, chart *chart.Chart, chartPath string, extensionServerFQDN string, extensionServerPort int, xdsServerFQDN string, xdsServerPort int) error {
-	// Set values with extension server configuration
-	values := map[string]interface{}{
-		"config": map[string]interface{}{
-			"envoyGateway": map[string]interface{}{
-				"gateway": map[string]interface{}{
-					"controllerName": "gateway.envoyproxy.io/gatewayclass-controller",
-				},
-				"provider": map[string]interface{}{
-					"type": "Kubernetes",
-					"kubernetes": map[string]interface{}{
-						"envoyProxy": map[string]interface{}{
-							"bootstrap": map[string]interface{}{
-								"value": fmt.Sprintf(`{
-  "static_resources": {
-    "clusters": [
-      {
-        "name": "%s",
-        "type": "STRICT_DNS",
-        "connect_timeout": "5s",
-        "load_assignment": {
-          "cluster_name": "%s",
-          "endpoints": [
-            {
-              "lb_endpoints": [
-                {
-                  "endpoint": {
-                    "address": {
-                      "socket_address": {
-                        "address": "%s",
-                        "port_value": %d
-                      }
-                    }
-                  }
-                }
-              ]
-            }
-          ]
-        }
-      }
-    ]
-  }
-}`, XdsServerName, XdsServerName, xdsServerFQDN, xdsServerPort),
-							},
-						},
-					},
-				},
-				"logging": map[string]interface{}{
-					"level": map[string]interface{}{
-						"default": "info",
-					},
-				},
-				"extensionManager": map[string]interface{}{
-					"backendResources": []map[string]interface{}{
-						{
-							"group":   XdsBackendGroup,
-							"version": XdsBackendAPIVersion,
-							"kind":    "XdsBackend",
-						},
-					},
-					"hooks": map[string]interface{}{
-						"xdsTranslator": map[string]interface{}{
-							"post": []string{"Cluster"},
-						},
-					},
-					"service": map[string]interface{}{
-						"fqdn": map[string]interface{}{
-							"hostname": extensionServerFQDN,
-							"port":     extensionServerPort,
-						},
-					},
-				},
-			},
-		},
-		"deployment": map[string]interface{}{
-			"ports": []map[string]interface{}{
-				{
-					"name":       "http",
-					"port":       EnvoyGatewayContainerPort,
-					"targetPort": EnvoyGatewayContainerPort,
-				},
-				{
-					"name":       "https",
-					"port":       EnvoyGatewayHTTPSContainerPort,
-					"targetPort": EnvoyGatewayHTTPSContainerPort,
-				},
-				{
-					"name":       "grpc",
-					"port":       18000,
-					"targetPort": 18000,
-				},
-				{
-					"name":       "ratelimit",
-					"port":       18001,
-					"targetPort": 18001,
-				},
-				{
-					"name":       "wasm",
-					"port":       18002,
-					"targetPort": 18002,
-				},
-				{
-					"name":       "metrics",
-					"port":       19001,
-					"targetPort": 19001,
-				},
-			},
-		},
+	// Load Helm values from template
+	valuesTemplateData := TemplateData{
+		XdsBackendGroup:                XdsBackendGroup,
+		XdsBackendAPIVersion:           XdsBackendAPIVersion,
+		ExtensionServerFQDN:            extensionServerFQDN,
+		ExtensionServerPort:            extensionServerPort,
+		EnvoyGatewayContainerPort:      EnvoyGatewayContainerPort,
+		EnvoyGatewayHTTPSContainerPort: EnvoyGatewayHTTPSContainerPort,
 	}
+	valuesTemplatePath := GetTemplatePath("envoy-gateway-values.yaml")
+	values, err := LoadHelmValues(valuesTemplatePath, valuesTemplateData)
+	if err != nil {
+		return fmt.Errorf("failed to load Helm values template: %w", err)
+	}
+
+	// Debug: Log the rendered Helm values
+	e.logger.Logf("[EnvoyGateway] Helm values configured for Envoy Gateway installation")
 
 	// Check if already installed
 	histAction := action.NewHistory(actionConfig)
 	histAction.Max = 1
-	_, err := histAction.Run(EnvoyGatewayReleaseName)
+	_, err = histAction.Run(EnvoyGatewayReleaseName)
 	if err == nil {
 		e.logger.Log("[EnvoyGateway] Release already installed, upgrading...")
 		// Upgrade instead of install
@@ -310,6 +238,72 @@ func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *
 	}
 	e.logger.Log("[EnvoyGateway] Helm release 'eg' installed successfully")
 
+	return nil
+}
+
+// UpgradeWithEdsConfigMap upgrades the Envoy Gateway Helm release to mount the EDS ConfigMap
+func (e *EnvoyGatewayInstaller) UpgradeWithEdsConfigMap(ctx context.Context, extensionServerFQDN string, extensionServerPort int, edsConfigMapName string) error {
+	e.logger.Log("[EnvoyGateway] Upgrading Helm release to mount EDS ConfigMap...")
+
+	// Get Helm action configuration
+	actionConfig := new(action.Configuration)
+	if err := actionConfig.Init(e.settings.RESTClientGetter(), EnvoyGatewayNamespace, "secret", func(format string, v ...interface{}) {
+		msg := fmt.Sprintf(format, v...)
+		if strings.Contains(msg, "Error") || strings.Contains(msg, "Failed") ||
+			strings.Contains(msg, "Upgrading") || strings.Contains(msg, "upgraded") {
+			e.logger.Logf("[EnvoyGateway] Helm: %s", msg)
+		}
+	}); err != nil {
+		return fmt.Errorf("failed to init helm action config: %w", err)
+	}
+
+	// Set up registry client
+	registryClient, err := registry.NewClient(
+		registry.ClientOptDebug(false),
+		registry.ClientOptWriter(os.Stderr),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create registry client: %w", err)
+	}
+	actionConfig.RegistryClient = registryClient
+
+	// Load chart
+	chartPath := e.findExistingChart()
+	if chartPath == "" {
+		return fmt.Errorf("failed to find chart in %s", e.chartDir)
+	}
+	chart, err := loader.Load(chartPath)
+	if err != nil {
+		return fmt.Errorf("failed to load chart: %w", err)
+	}
+
+	// Load Helm values
+	valuesTemplateData := TemplateData{
+		XdsBackendGroup:                XdsBackendGroup,
+		XdsBackendAPIVersion:           XdsBackendAPIVersion,
+		ExtensionServerFQDN:            extensionServerFQDN,
+		ExtensionServerPort:            extensionServerPort,
+		EnvoyGatewayContainerPort:      EnvoyGatewayContainerPort,
+		EnvoyGatewayHTTPSContainerPort: EnvoyGatewayHTTPSContainerPort,
+	}
+	valuesTemplatePath := GetTemplatePath("envoy-gateway-values.yaml")
+	values, err := LoadHelmValues(valuesTemplatePath, valuesTemplateData)
+	if err != nil {
+		return fmt.Errorf("failed to load Helm values template: %w", err)
+	}
+
+	// Perform upgrade
+	upgradeAction := action.NewUpgrade(actionConfig)
+	upgradeAction.Namespace = EnvoyGatewayNamespace
+	upgradeAction.Wait = false
+	upgradeAction.Timeout = HelmTimeout
+
+	_, err = upgradeAction.RunWithContext(ctx, EnvoyGatewayReleaseName, chart, values)
+	if err != nil {
+		return fmt.Errorf("failed to upgrade Envoy Gateway: %w", err)
+	}
+
+	e.logger.Log("[EnvoyGateway] Helm release upgraded successfully")
 	return nil
 }
 

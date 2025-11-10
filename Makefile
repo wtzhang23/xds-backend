@@ -24,3 +24,11 @@ buf-dep-update:
 .PHONY: test-e2e
 test-e2e: docker-build 
 	go test -v ./test/e2e/...
+
+.PHONY: clean
+clean:
+	rm -rf test/**/.rendered-configs/
+	rm -rf test/**/.kubeconfig/
+	rm -rf test/**/.logs/
+	rm -rf test/**/.helm/
+	rm -rf test/**/.cache/

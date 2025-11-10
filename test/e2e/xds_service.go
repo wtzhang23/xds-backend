@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"net"
 
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	discoveryv1 "k8s.io/api/discovery/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -55,70 +52,30 @@ func (e *XdsServiceExposer) Expose(ctx context.Context, xdsServerAddress string)
 		return "", fmt.Errorf("failed to parse xDS server address: %w", err)
 	}
 
-	// Create an EndpointSlice resource pointing to the host
-	// EndpointSlice name must be a valid DNS subdomain name and end with the service name
-	endpointSliceName := fmt.Sprintf("%s-1", e.serviceName)
-	tcpProtocol := corev1.ProtocolTCP
-	grpcPortName := "grpc"
-	port := int32(e.port)
-	endpointSlice := &discoveryv1.EndpointSlice{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      endpointSliceName,
-			Namespace: e.namespace,
-			Labels: map[string]string{
-				discoveryv1.LabelServiceName: e.serviceName,
-			},
-		},
-		AddressType: discoveryv1.AddressTypeIPv4,
-		Endpoints: []discoveryv1.Endpoint{
-			{
-				Addresses: []string{hostIP},
-			},
-		},
-		Ports: []discoveryv1.EndpointPort{
-			{
-				Port:     &port,
-				Protocol: &tcpProtocol,
-				Name:     &grpcPortName,
-			},
-		},
+	// Load EndpointSlice template
+	templateData := TemplateData{
+		XdsServiceName: e.serviceName,
+		TestNamespace:  e.namespace,
+		XdsServerPort:  e.port,
+		HostIP:         hostIP,
 	}
-
-	_, err = e.k8sClient.GetClientset().DiscoveryV1().EndpointSlices(e.namespace).Create(ctx, endpointSlice, metav1.CreateOptions{})
+	endpointSliceTemplatePath := GetTemplatePath("xds-endpointslice.yaml")
+	endpointSliceYaml, err := LoadTemplate(endpointSliceTemplatePath, templateData)
 	if err != nil {
-		// Update if exists
-		_, err = e.k8sClient.GetClientset().DiscoveryV1().EndpointSlices(e.namespace).Update(ctx, endpointSlice, metav1.UpdateOptions{})
-		if err != nil {
-			return "", fmt.Errorf("failed to create/update endpointslice: %w", err)
-		}
+		return "", fmt.Errorf("failed to load endpointslice template: %w", err)
+	}
+	if err := e.k8sClient.ApplyYAML(ctx, endpointSliceYaml); err != nil {
+		return "", fmt.Errorf("failed to apply endpointslice: %w", err)
 	}
 
-	// Create a headless service that uses the endpoints
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      e.serviceName,
-			Namespace: e.namespace,
-		},
-		Spec: corev1.ServiceSpec{
-			Type:      corev1.ServiceTypeClusterIP,
-			ClusterIP: "None", // Headless service
-			Ports: []corev1.ServicePort{
-				{
-					Port:     int32(e.port),
-					Protocol: corev1.ProtocolTCP,
-					Name:     "grpc",
-				},
-			},
-		},
-	}
-
-	_, err = e.k8sClient.GetClientset().CoreV1().Services(e.namespace).Create(ctx, service, metav1.CreateOptions{})
+	// Load service template
+	serviceTemplatePath := GetTemplatePath("xds-service.yaml")
+	serviceYaml, err := LoadTemplate(serviceTemplatePath, templateData)
 	if err != nil {
-		// Update if exists
-		_, err = e.k8sClient.GetClientset().CoreV1().Services(e.namespace).Update(ctx, service, metav1.UpdateOptions{})
-		if err != nil {
-			return "", fmt.Errorf("failed to create/update service: %w", err)
-		}
+		return "", fmt.Errorf("failed to load service template: %w", err)
+	}
+	if err := e.k8sClient.ApplyYAML(ctx, serviceYaml); err != nil {
+		return "", fmt.Errorf("failed to apply service: %w", err)
 	}
 
 	// Return the service DNS name
@@ -129,65 +86,23 @@ func (e *XdsServiceExposer) Expose(ctx context.Context, xdsServerAddress string)
 // getHostIP gets the IP address of the host that's accessible from the kind cluster
 // We deploy a proxy pod with hostNetwork that can access localhost on the host
 func (e *XdsServiceExposer) getHostIP(ctx context.Context) (string, error) {
-	// Deploy a simple proxy pod with hostNetwork that will forward traffic
-	// This pod runs with hostNetwork=true, so it can access localhost on the host
-	proxyPodName := fmt.Sprintf("%s-proxy", e.serviceName)
-
-	// Helper function for int32 pointer
-	int32Ptr := func(i int32) *int32 { return &i }
-
-	// Create a proxy deployment that uses hostNetwork
-	proxyDeployment := &appsv1.Deployment{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      proxyPodName,
-			Namespace: e.namespace,
-		},
-		Spec: appsv1.DeploymentSpec{
-			Replicas: int32Ptr(1),
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": proxyPodName,
-				},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": proxyPodName,
-					},
-				},
-				Spec: corev1.PodSpec{
-					HostNetwork: true, // This allows access to host's localhost
-					Containers: []corev1.Container{
-						{
-							Name:  "socat",
-							Image: "alpine/socat:latest",
-							Args: []string{
-								"TCP-LISTEN:" + fmt.Sprintf("%d", e.port) + ",fork,reuseaddr",
-								"TCP-CONNECT:127.0.0.1:" + fmt.Sprintf("%d", e.port),
-							},
-							Ports: []corev1.ContainerPort{
-								{
-									ContainerPort: int32(e.port),
-									Protocol:      corev1.ProtocolTCP,
-								},
-							},
-						},
-					},
-				},
-			},
-		},
+	// Load proxy deployment template
+	templateData := TemplateData{
+		XdsServiceName: e.serviceName,
+		TestNamespace:  e.namespace,
+		XdsServerPort:  e.port,
 	}
-
-	_, err := e.k8sClient.GetClientset().AppsV1().Deployments(e.namespace).Create(ctx, proxyDeployment, metav1.CreateOptions{})
+	proxyDeploymentTemplatePath := GetTemplatePath("xds-proxy-deployment.yaml")
+	proxyDeploymentYaml, err := LoadTemplate(proxyDeploymentTemplatePath, templateData)
 	if err != nil {
-		// Update if exists
-		_, err = e.k8sClient.GetClientset().AppsV1().Deployments(e.namespace).Update(ctx, proxyDeployment, metav1.UpdateOptions{})
-		if err != nil {
-			return "", fmt.Errorf("failed to create/update proxy deployment: %w", err)
-		}
+		return "", fmt.Errorf("failed to load proxy deployment template: %w", err)
+	}
+	if err := e.k8sClient.ApplyYAML(ctx, proxyDeploymentYaml); err != nil {
+		return "", fmt.Errorf("failed to apply proxy deployment: %w", err)
 	}
 
 	// Wait for the pod to be ready
+	proxyPodName := fmt.Sprintf("%s-proxy", e.serviceName)
 	labelSelector := fmt.Sprintf("app=%s", proxyPodName)
 	if err := e.k8sClient.WaitForPodsReady(ctx, e.namespace, labelSelector, DeploymentTimeout); err != nil {
 		return "", fmt.Errorf("failed to wait for proxy pod: %w", err)

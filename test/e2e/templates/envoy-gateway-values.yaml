@@ -1,0 +1,41 @@
+config:
+  envoyGateway:
+    gateway:
+      controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    logging:
+      level:
+        default: info
+    extensionManager:
+      backendResources:
+      - group: {{ .XdsBackendGroup }}
+        version: {{ .XdsBackendAPIVersion }}
+        kind: XdsBackend
+      hooks:
+        xdsTranslator:
+          post:
+          - Cluster
+      service:
+        fqdn:
+          hostname: {{ .ExtensionServerFQDN }}
+          port: {{ .ExtensionServerPort }}
+deployment:
+  ports:
+  - name: http
+    port: {{ .EnvoyGatewayContainerPort }}
+    targetPort: {{ .EnvoyGatewayContainerPort }}
+  - name: https
+    port: {{ .EnvoyGatewayHTTPSContainerPort }}
+    targetPort: {{ .EnvoyGatewayHTTPSContainerPort }}
+  - name: grpc
+    port: 18000
+    targetPort: 18000
+  - name: ratelimit
+    port: 18001
+    targetPort: 18001
+  - name: wasm
+    port: 18002
+    targetPort: 18002
+  - name: metrics
+    port: 19001
+    targetPort: 19001
+

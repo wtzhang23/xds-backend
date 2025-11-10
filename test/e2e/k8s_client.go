@@ -1,6 +1,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/remotecommand"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
 )
@@ -319,9 +321,7 @@ func (k *K8sClient) applyUnstructured(ctx context.Context, obj *unstructured.Uns
 
 	// Remove namespace from cluster-scoped resources
 	clusterScopedKinds := map[string]bool{
-		"Gateway":            true,
 		"EnvoyGateway":       true,
-		"EnvoyProxy":         true,
 		"GatewayClass":       true,
 		"ClusterRole":        true,
 		"ClusterRoleBinding": true,
@@ -389,8 +389,6 @@ func (k *K8sClient) getResourceClient(gvr schema.GroupVersionResource, kind, nam
 	// Cluster-scoped resources
 	clusterScopedKinds := map[string]bool{
 		"EnvoyGateway":       true,
-		"EnvoyProxy":         true,
-		"Gateway":            true,
 		"GatewayClass":       true,
 		"ClusterRole":        true,
 		"ClusterRoleBinding": true,
@@ -431,6 +429,9 @@ func (k *K8sClient) getGVR(gvk *schema.GroupVersionKind) schema.GroupVersionReso
 	case "Gateway":
 		// Gateway API uses "gateways" as the resource name
 		gvr.Resource = "gateways"
+	case "GatewayClass":
+		// Gateway API uses "gatewayclasses" as the resource name
+		gvr.Resource = "gatewayclasses"
 	case "HTTPRoute":
 		// Gateway API uses "httproutes" as the resource name
 		gvr.Resource = "httproutes"
@@ -748,6 +749,47 @@ func (k *K8sClient) GetConfigMap(ctx context.Context, namespace, name string) (*
 		return nil, fmt.Errorf("failed to get configmap: %w", err)
 	}
 	return cm, nil
+}
+
+// ExecInPod executes a command in a pod container and returns stdout, stderr, and error
+func (k *K8sClient) ExecInPod(ctx context.Context, namespace, podName, containerName string, command []string) (string, string, error) {
+	if containerName == "" {
+		return "", "", fmt.Errorf("container name cannot be empty")
+	}
+
+	// Use the RESTClient with proper parameter encoding
+	req := k.clientset.CoreV1().RESTClient().Post().
+		Resource("pods").
+		Name(podName).
+		Namespace(namespace).
+		SubResource("exec")
+
+	// Set parameters using VersionedParams
+	opts := &corev1.PodExecOptions{
+		Container: containerName,
+		Command:   command,
+		Stdout:    true,
+		Stderr:    true,
+		TTY:       false,
+	}
+
+	req = req.VersionedParams(opts, metav1.ParameterCodec)
+
+	exec, err := remotecommand.NewSPDYExecutor(k.config, "POST", req.URL())
+	if err != nil {
+		return "", "", fmt.Errorf("failed to create executor: %w", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	err = exec.Stream(remotecommand.StreamOptions{
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err != nil {
+		return stdout.String(), stderr.String(), fmt.Errorf("failed to execute command: %w", err)
+	}
+
+	return stdout.String(), stderr.String(), nil
 }
 
 // GetConfig returns the REST config
