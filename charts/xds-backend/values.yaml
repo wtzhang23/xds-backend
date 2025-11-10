@@ -23,7 +23,7 @@ image:
   # This sets the pull policy for images.
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "latest"
+  # tag: "latest" # If not set, the image tag will be the chart appVersion.
 
 # Log level for the extension server (debug, info, warn, error)
 logLevel: "info"
