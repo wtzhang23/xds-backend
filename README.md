@@ -127,6 +127,27 @@ This guide provides a high-level overview of the components needed to set up xds
 
 3. **Configure Gateway Resources**: Create a GatewayClass and Gateway resource following standard Gateway API patterns. The Gateway will be managed by Envoy Gateway.
 
+   **Important**: The Gateway resource must reference the `EnvoyProxy` resource via `infrastructure.parametersRef` to apply custom configurations (such as bootstrap config or volume mounts). Example Gateway resource:
+
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1
+   kind: Gateway
+   metadata:
+     name: eg
+     namespace: envoy-gateway-system
+   spec:
+     gatewayClassName: eg
+     infrastructure:
+       parametersRef:
+         group: gateway.envoyproxy.io
+         kind: EnvoyProxy
+         name: eg  # Must match the EnvoyProxy resource name
+     listeners:
+     - name: http
+       protocol: HTTP
+       port: 80
+   ```
+
 4. **Set Up EDS Configuration**: Choose one of the following approaches:
    - **File-based EDS**: Create a ConfigMap containing endpoint discovery data in Envoy's EDS format and mount it in the Envoy proxy pods (see [Configuring File-based EDS](#configuring-file-based-eds))
    - **Remote xDS Server**: Configure a static cluster in the EnvoyProxy bootstrap configuration that points to your xDS server (see [Configuring Remote xDS Server](#configuring-remote-xds-server))
@@ -227,7 +248,9 @@ data:
 
 When using `XdsBackend` with a remote xDS server (via `server` config source), you must configure a static cluster in Envoy's bootstrap configuration that points to your xDS server. This cluster name must match the `server` name specified in your `XdsBackend` resource.
 
-You can configure this using the `EnvoyProxy` resource's bootstrap configuration. For detailed information, see the [Envoy Gateway documentation on customizing EnvoyProxy bootstrap config](https://gateway.envoyproxy.io/docs/tasks/operations/customize-envoyproxy/#customize-envoyproxy-bootstrap-config).
+You can configure this using the `EnvoyProxy` resource's bootstrap configuration. The bootstrap config uses a **string patch type** (`value:`) that allows you to provide the complete bootstrap configuration as a YAML string. For detailed information, see the [Envoy Gateway documentation on customizing EnvoyProxy bootstrap config](https://gateway.envoyproxy.io/docs/tasks/operations/customize-envoyproxy/#customize-envoyproxy-bootstrap-config).
+
+**Note**: The `bootstrap.value` field uses a string patch type, meaning you provide the entire bootstrap configuration as a multi-line YAML string. This allows you to add static clusters, listeners, and other bootstrap-level configurations.
 
 Example `EnvoyProxy` resource with a static cluster for a remote xDS server:
 
@@ -239,7 +262,8 @@ metadata:
   namespace: envoy-gateway-system
 spec:
   bootstrap:
-    value: |
+    type: Merge
+    value: |    # Bootstrap config as YAML string
       static_resources:
         clusters:
         - name: my-xds-server
