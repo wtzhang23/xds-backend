@@ -1,4 +1,7 @@
-bin
+# Build and temporary files
+bin/
+
+# Test-specific temporary files
 test/e2e/.helm/
 test/e2e/.cache/
 test/e2e/.kubeconfig/

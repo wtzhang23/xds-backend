@@ -1,0 +1,12 @@
+apiVersion: {{ .XdsBackendGroup }}/{{ .XdsBackendAPIVersion }}
+kind: {{ .XdsBackendKind }}
+metadata:
+  name: {{ .XdsBackendResourceName }}
+  namespace: {{ .EnvoyGatewayNamespace }}
+spec:
+  path:
+    path: {{ .EdsConfigPath }}
+    watchedDir: /etc/envoy/eds
+  service: {{ .TestServiceName }}
+  apiType: GRPC
+
