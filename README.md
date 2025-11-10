@@ -330,22 +330,24 @@ spec:
 ### Building from Source
 
 ```bash
-# Build the extension server
-go build -o bin/xds-backend-extension-server ./cmd/xds-backend-extension-server
+# Build the extension server binary
+make build
 
 # Build the Docker image
-docker build -t wtzhang23/xds-backend-extension-server:latest .
+make docker-build
 ```
 
 ### Running Tests
 
 ```bash
 # Run unit tests
-go test ./...
+make test
 
 # Run e2e tests (requires Kind cluster)
-cd test/e2e
-go test -v
+make test-e2e
+
+# Run tests with coverage report
+make test-coverage
 ```
 
 ## License

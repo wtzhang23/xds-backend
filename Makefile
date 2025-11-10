@@ -1,5 +1,12 @@
 IMAGE_REPO := wtzhang23/xds-backend-extension-server
 IMAGE_TAG := latest
+BINARY_NAME := xds-backend-extension-server
+BINARY_PATH := bin/$(BINARY_NAME)
+
+.PHONY: build
+build:
+	@mkdir -p bin
+	go build -o $(BINARY_PATH) ./cmd/xds-backend-extension-server
 
 .PHONY: docker-build
 docker-build:
