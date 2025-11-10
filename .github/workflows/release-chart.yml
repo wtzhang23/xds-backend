@@ -1,0 +1,48 @@
+name: Release Helm Chart
+
+# Note: This workflow requires GitHub Pages to be enabled in repository settings.
+# Go to Settings > Pages and set the source to the 'main' branch with '/docs' folder.
+# The chart-releaser-action will update the docs/ directory in the main branch with
+# the chart repository index and packages.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'charts/xds-backend/**'
+      - '.github/workflows/release-chart.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Set up Helm
+        uses: helm/setup-helm@v1
+        with:
+          version: 'latest'
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.8.1
+        env:
+          CR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          charts_dir: charts
+          config: cr.yaml
+
