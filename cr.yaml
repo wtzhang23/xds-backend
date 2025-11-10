@@ -4,7 +4,5 @@ charts-repo: https://wtzhang23.github.io/xds-backend
 packages-with-index: true
 push: true
 skip-existing: true
-pages-branch: main
-pages-index-path: docs/index.yaml
-index-path: docs/index.yaml
+pages-branch: gh-pages
 
