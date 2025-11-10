@@ -23,7 +23,6 @@ graph TB
             EGController[Envoy Gateway Controller<br/>Processes Gateway API resources]
             EnvoyProxy[Envoy Proxy Pod<br/>Data plane proxy]
             Gateway[Gateway Resource]
-            GatewayClass[GatewayClass Resource]
         end
 
         subgraph "xds-backend-system namespace"
@@ -38,8 +37,6 @@ graph TB
     subgraph "Backend Services"
         BackendService[Backend Service<br/>Endpoints discovered via EDS]
     end
-
-    Client[Client]
 
     %% User creates resources
     HTTPRoute -->|references| XdsBackend
@@ -59,7 +56,6 @@ graph TB
     ExternalEDS -->|provides endpoint data| EnvoyProxy
     
     %% Traffic flow
-    Client -->|HTTP traffic| EnvoyProxy
     EnvoyProxy -->|discovers endpoints via EDS| BackendService
     
     %% Styling - colors optimized for both light and dark modes
@@ -68,14 +64,12 @@ graph TB
     classDef extension fill:#70ad47,stroke:#507e32,stroke-width:2px,color:#fff
     classDef external fill:#8b7d9b,stroke:#6b5d7b,stroke-width:2px,color:#fff
     classDef backend fill:#c55aa6,stroke:#933d7a,stroke-width:2px,color:#fff
-    classDef client fill:#95a5a6,stroke:#7f8c8d,stroke-width:2px,color:#fff
     
     class HTTPRoute,XdsBackend userResource
-    class EGController,EnvoyProxy,Gateway,GatewayClass systemComponent
+    class EGController,EnvoyProxy,Gateway systemComponent
     class ExtensionServer extension
     class ExternalEDS external
     class BackendService backend
-    class Client client
 ```
 
 ### Component Details
