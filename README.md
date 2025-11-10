@@ -111,7 +111,19 @@ This guide provides a high-level overview of the components needed to set up xds
    - Enable the `PostClusterModify` hook
    - Point to the extension server's FQDN and port (default: `xds-backend.xds-backend-system.svc.cluster.local:5005`)
 
-2. **Deploy Extension Server**: Build the extension server Docker image and deploy it using the provided Helm chart at `charts/xds-backend` in this repository. The chart automatically installs the XdsBackend CRD from the `crds/` directory. The extension server runs a gRPC service that Envoy Gateway calls to modify cluster configurations.
+2. **Deploy Extension Server**: Deploy the extension server using the Helm chart. The chart automatically installs the XdsBackend CRD from the `crds/` directory. The extension server runs a gRPC service that Envoy Gateway calls to modify cluster configurations.
+
+   **Using the Helm Chart Repository:**
+   ```bash
+   helm repo add xds-backend https://wtzhang23.github.io/xds-backend
+   helm repo update
+   helm install xds-backend xds-backend/xds-backend --namespace xds-backend-system --create-namespace
+   ```
+
+   **Or install from the local chart:**
+   ```bash
+   helm install xds-backend ./charts/xds-backend --namespace xds-backend-system --create-namespace
+   ```
 
 3. **Configure Gateway Resources**: Create a GatewayClass and Gateway resource following standard Gateway API patterns. The Gateway will be managed by Envoy Gateway.
 
@@ -324,6 +336,35 @@ spec:
     kind: XdsBackend
     name: my-backend
 ```
+
+## Installation
+
+### Helm Chart
+
+The xds-backend Helm chart is available in the [Helm Chart Repository](https://wtzhang23.github.io/xds-backend).
+
+To install using Helm:
+
+```bash
+# Add the Helm repository
+helm repo add xds-backend https://wtzhang23.github.io/xds-backend
+helm repo update
+
+# Install the chart
+helm install xds-backend xds-backend/xds-backend \
+  --namespace xds-backend-system \
+  --create-namespace
+```
+
+To upgrade to the latest version:
+
+```bash
+helm repo update
+helm upgrade xds-backend xds-backend/xds-backend \
+  --namespace xds-backend-system
+```
+
+For more information about the chart and configuration options, see the [chart repository](https://wtzhang23.github.io/xds-backend).
 
 ## Development
 
