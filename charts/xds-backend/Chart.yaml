@@ -1,0 +1,7 @@
+apiVersion: v2
+name: xds-backend
+description: Deploy the xDS backend extension server
+
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

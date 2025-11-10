@@ -1,0 +1,8 @@
+owner: wtzhang23
+git-repo: xds-backend
+charts-repo: https://wtzhang23.github.io/xds-backend
+packages-with-index: true
+push: true
+skip-existing: true
+pages-branch: gh-pages
+

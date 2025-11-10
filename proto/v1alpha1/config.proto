@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package xdsbackend.v1alpha1;
+
+option go_package = "proto/v1alpha1";
+
+message Config {}

@@ -1,0 +1,17 @@
+name: {{ .ClusterName }}
+nodes:
+- role: control-plane
+  kubeadmConfigPatches:
+  - |
+    kind: InitConfiguration
+    nodeRegistration:
+      kubeletExtraArgs:
+        node-labels: "ingress-ready=true"
+  extraPortMappings:
+  - containerPort: {{ .EnvoyGatewayContainerPort }}
+    hostPort: {{ .EnvoyGatewayHostPort }}
+    protocol: TCP
+  - containerPort: {{ .EnvoyGatewayHTTPSContainerPort }}
+    hostPort: {{ .EnvoyGatewayHTTPSHostPort }}
+    protocol: TCP
+
