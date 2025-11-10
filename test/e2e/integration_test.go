@@ -49,6 +49,8 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(k8sClient.WaitForCRD(ctx, "gateways.gateway.networking.k8s.io")).To(Succeed())
 		Expect(k8sClient.WaitForCRD(ctx, "httproutes.gateway.networking.k8s.io")).To(Succeed())
 		Expect(k8sClient.WaitForCRD(ctx, "gatewayclasses.gateway.networking.k8s.io")).To(Succeed())
+		// Wait for XdsBackend CRD (installed by the extension server Helm chart)
+		Expect(k8sClient.WaitForCRD(ctx, "xdsbackends.xdsbackend.wtzhang23.github.io")).To(Succeed())
 		envoyProxyCRDAvailable := k8sClient.WaitForCRD(ctx, "envoyproxies.gateway.envoyproxy.io") == nil
 
 		// Get test service IP
