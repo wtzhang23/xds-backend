@@ -2,17 +2,6 @@ syntax = "proto3";
 
 package xdsbackend.v1alpha1;
 
-import "envoy/config/cluster/v3/cluster.proto";
-import "envoy/config/core/v3/config_source.proto";
-
 option go_package = "proto/v1alpha1";
 
-message Config {
-    repeated XdsSource sources = 1;
-}
-
-message XdsSource {
-    string name = 1;
-    envoy.config.cluster.v3.Cluster cluster = 2;
-    envoy.config.core.v3.ConfigSource config_source = 3;
-}
+message Config {}

@@ -7,8 +7,6 @@
 package v1alpha1
 
 import (
-	v3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
-	v31 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -25,7 +23,6 @@ const (
 
 type Config struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sources       []*XdsSource           `protobuf:"bytes,1,rep,name=sources,proto3" json:"sources,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -60,84 +57,12 @@ func (*Config) Descriptor() ([]byte, []int) {
 	return file_v1alpha1_config_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Config) GetSources() []*XdsSource {
-	if x != nil {
-		return x.Sources
-	}
-	return nil
-}
-
-type XdsSource struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Cluster       *v3.Cluster            `protobuf:"bytes,2,opt,name=cluster,proto3" json:"cluster,omitempty"`
-	ConfigSource  *v31.ConfigSource      `protobuf:"bytes,3,opt,name=config_source,json=configSource,proto3" json:"config_source,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *XdsSource) Reset() {
-	*x = XdsSource{}
-	mi := &file_v1alpha1_config_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *XdsSource) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*XdsSource) ProtoMessage() {}
-
-func (x *XdsSource) ProtoReflect() protoreflect.Message {
-	mi := &file_v1alpha1_config_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use XdsSource.ProtoReflect.Descriptor instead.
-func (*XdsSource) Descriptor() ([]byte, []int) {
-	return file_v1alpha1_config_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *XdsSource) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *XdsSource) GetCluster() *v3.Cluster {
-	if x != nil {
-		return x.Cluster
-	}
-	return nil
-}
-
-func (x *XdsSource) GetConfigSource() *v31.ConfigSource {
-	if x != nil {
-		return x.ConfigSource
-	}
-	return nil
-}
-
 var File_v1alpha1_config_proto protoreflect.FileDescriptor
 
 const file_v1alpha1_config_proto_rawDesc = "" +
 	"\n" +
-	"\x15v1alpha1/config.proto\x12\x13xdsbackend.v1alpha1\x1a%envoy/config/cluster/v3/cluster.proto\x1a(envoy/config/core/v3/config_source.proto\"B\n" +
-	"\x06Config\x128\n" +
-	"\asources\x18\x01 \x03(\v2\x1e.xdsbackend.v1alpha1.XdsSourceR\asources\"\xa4\x01\n" +
-	"\tXdsSource\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12:\n" +
-	"\acluster\x18\x02 \x01(\v2 .envoy.config.cluster.v3.ClusterR\acluster\x12G\n" +
-	"\rconfig_source\x18\x03 \x01(\v2\".envoy.config.core.v3.ConfigSourceR\fconfigSourceB\x10Z\x0eproto/v1alpha1b\x06proto3"
+	"\x15v1alpha1/config.proto\x12\x13xdsbackend.v1alpha1\"\b\n" +
+	"\x06ConfigB\x10Z\x0eproto/v1alpha1b\x06proto3"
 
 var (
 	file_v1alpha1_config_proto_rawDescOnce sync.Once
@@ -151,22 +76,16 @@ func file_v1alpha1_config_proto_rawDescGZIP() []byte {
 	return file_v1alpha1_config_proto_rawDescData
 }
 
-var file_v1alpha1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_v1alpha1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_v1alpha1_config_proto_goTypes = []any{
-	(*Config)(nil),           // 0: xdsbackend.v1alpha1.Config
-	(*XdsSource)(nil),        // 1: xdsbackend.v1alpha1.XdsSource
-	(*v3.Cluster)(nil),       // 2: envoy.config.cluster.v3.Cluster
-	(*v31.ConfigSource)(nil), // 3: envoy.config.core.v3.ConfigSource
+	(*Config)(nil), // 0: xdsbackend.v1alpha1.Config
 }
 var file_v1alpha1_config_proto_depIdxs = []int32{
-	1, // 0: xdsbackend.v1alpha1.Config.sources:type_name -> xdsbackend.v1alpha1.XdsSource
-	2, // 1: xdsbackend.v1alpha1.XdsSource.cluster:type_name -> envoy.config.cluster.v3.Cluster
-	3, // 2: xdsbackend.v1alpha1.XdsSource.config_source:type_name -> envoy.config.core.v3.ConfigSource
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0, // [0:0] is the sub-list for method output_type
+	0, // [0:0] is the sub-list for method input_type
+	0, // [0:0] is the sub-list for extension type_name
+	0, // [0:0] is the sub-list for extension extendee
+	0, // [0:0] is the sub-list for field type_name
 }
 
 func init() { file_v1alpha1_config_proto_init() }
@@ -180,7 +99,7 @@ func file_v1alpha1_config_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_v1alpha1_config_proto_rawDesc), len(file_v1alpha1_config_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
