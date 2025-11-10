@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log/slog"
 	"net"
 	"net/http"
@@ -10,10 +9,12 @@ import (
 	"syscall"
 
 	pb "github.com/envoyproxy/gateway/proto/extension"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/urfave/cli"
 	"github.com/wtzhang23/xds-backend/internal/handler"
 	"github.com/wtzhang23/xds-backend/pkg/server"
 	"google.golang.org/grpc"
+	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 func main() {
@@ -41,6 +42,11 @@ func main() {
 						Name:  "http-port",
 						Usage: "the port on which to listen for HTTP requests",
 						Value: 8080,
+					},
+					&cli.IntFlag{
+						Name:  "metrics-port",
+						Usage: "the port on which to expose metrics",
+						Value: 8081,
 					},
 					&cli.StringFlag{
 						Name:  "log-level",
@@ -89,20 +95,18 @@ func startExtensionServer(cCtx *cli.Context) error {
 		return err
 	}
 	var opts []grpc.ServerOption
-	// add logging interceptor for errors
-	opts = append(opts, grpc.UnaryInterceptor(func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		resp, err := handler(ctx, req)
-		if err != nil {
-			logger.Error("Error handling request", slog.String("method", info.FullMethod), slog.String("error", err.Error()))
-		}
-		return resp, err
-	}))
+	opts = append(opts, grpc.ChainUnaryInterceptor(
+		metricsUnaryInterceptor(),
+		loggingUnaryInterceptor(logger),
+	))
 	grpcServer = grpc.NewServer(opts...)
-	pb.RegisterEnvoyGatewayExtensionServer(grpcServer, server.NewServer(
+	extensionServer := server.NewServer(
 		logger,
 		&handler.XdsBackendHandler{},
-	))
+	)
+	pb.RegisterEnvoyGatewayExtensionServer(grpcServer, extensionServer)
 	go startHTTPServer(cCtx, logger)
+	go startMetricsServer(cCtx, logger)
 	return grpcServer.Serve(lis)
 }
 
@@ -119,4 +123,17 @@ func startHTTPServer(cCtx *cli.Context, log *slog.Logger) error {
 		Handler: mux,
 	}
 	return httpServer.ListenAndServe()
+}
+
+func startMetricsServer(cCtx *cli.Context, log *slog.Logger) error {
+	metricsAddress := net.JoinHostPort(cCtx.String("host"), cCtx.String("metrics-port"))
+	log.Info("Starting metrics server", slog.String("metrics-address", metricsAddress))
+	mux := http.NewServeMux()
+	// Use controller-runtime metrics registry
+	mux.Handle("/metrics", promhttp.HandlerFor(metrics.Registry, promhttp.HandlerOpts{}))
+	metricsServer := &http.Server{
+		Addr:    metricsAddress,
+		Handler: mux,
+	}
+	return metricsServer.ListenAndServe()
 }

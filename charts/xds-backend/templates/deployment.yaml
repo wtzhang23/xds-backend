@@ -45,12 +45,17 @@ spec:
             - server
             - --log-level
             - {{ .Values.logLevel }}
+            - --metrics-port
+            - {{ .Values.service.metricsPort | quote }}
           ports:
             - name: http
               containerPort: {{ .Values.service.httpPort }}
               protocol: TCP
             - name: grpc
               containerPort: {{ .Values.service.grpcPort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: {{ .Values.service.metricsPort }}
               protocol: TCP
           {{- with .Values.livenessProbe }}
           livenessProbe:

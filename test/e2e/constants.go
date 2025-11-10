@@ -107,6 +107,8 @@ const (
 
 	// ExtensionServerPort is the gRPC port for the extension server
 	ExtensionServerPort = 5005
+	// ExtensionServerMetricsPort is the metrics port for the extension server
+	ExtensionServerMetricsPort = 8081
 
 	// EnvoyProxyOwningGatewayLabelKey is the label key for the owning gateway name
 	EnvoyProxyOwningGatewayLabelKey = "gateway.envoyproxy.io/owning-gateway-name"

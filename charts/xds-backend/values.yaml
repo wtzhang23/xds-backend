@@ -71,6 +71,7 @@ service:
   # This sets the ports more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/#field-spec-ports
   grpcPort: 5005
   httpPort: 8080
+  metricsPort: 8081
 
 resources: {}
   # We usually recommend not to specify default resources and to leave this as a conscious
