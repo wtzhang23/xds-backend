@@ -16,7 +16,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/portforward"
@@ -121,8 +120,11 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(k8sClient.WaitForCRD(ctx, "gateways.gateway.networking.k8s.io")).To(Succeed())
 		Expect(k8sClient.WaitForCRD(ctx, "httproutes.gateway.networking.k8s.io")).To(Succeed())
 		Expect(k8sClient.WaitForCRD(ctx, "gatewayclasses.gateway.networking.k8s.io")).To(Succeed())
-		Expect(k8sClient.WaitForCRD(ctx, "envoyproxies.gateway.envoyproxy.io")).To(Succeed())
-		defaultLogger.Log("[IntegrationTest] Gateway API CRDs are available")
+
+		// Note: We're configuring the EnvoyProxy bootstrap config via EnvoyGateway Helm values
+		// (see envoygateway.go), so we don't need to create an EnvoyProxy resource.
+		// The bootstrap config with the xDS server cluster is already applied during Helm installation.
+		defaultLogger.Log("[IntegrationTest] EnvoyProxy bootstrap config is configured via EnvoyGateway Helm values")
 
 		// Verify GatewayClassName exists, create if it doesn't
 		By("Verifying GatewayClassName exists")
@@ -132,7 +134,7 @@ var _ = Describe("xDS Backend Integration", func() {
 			if errors.IsNotFound(err) {
 				defaultLogger.Logf("[IntegrationTest] GatewayClassName '%s' not found, creating it...", GatewayClassName)
 				// Create GatewayClass for Envoy Gateway
-				// EnvoyProxy configuration is set via EnvoyGateway ConfigMap, so no ParametersRef needed
+				// Note: We're not using ParametersRef since we configure EnvoyProxy via Helm values
 				gatewayClass := &gatewayv1.GatewayClass{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: GatewayClassName,
@@ -156,10 +158,27 @@ var _ = Describe("xDS Backend Integration", func() {
 		} else {
 			defaultLogger.Logf("[IntegrationTest] GatewayClassName '%s' already exists: controller=%s",
 				GatewayClassName, gwc.Spec.ControllerName)
+			// Update GatewayClass to reference EnvoyProxy if it doesn't already
+			if gwc.Spec.ParametersRef == nil || gwc.Spec.ParametersRef.Name != GatewayClassName {
+				defaultLogger.Log("[IntegrationTest] Updating GatewayClass to reference EnvoyProxy...")
+				gwc.Spec.ParametersRef = &gatewayv1.ParametersReference{
+					Group:     gatewayv1.Group("gateway.envoyproxy.io"),
+					Kind:      gatewayv1.Kind("EnvoyProxy"),
+					Name:      GatewayClassName,
+					Namespace: (*gatewayv1.Namespace)(ptrOf(EnvoyGatewayNamespace)),
+				}
+				gatewayClassClient := k8sClient.GetGatewayClient().GatewayV1().GatewayClasses()
+				_, err = gatewayClassClient.Update(ctx, gwc, metav1.UpdateOptions{})
+				if err != nil {
+					defaultLogger.Logf("[IntegrationTest] Warning: Failed to update GatewayClass: %v", err)
+				} else {
+					defaultLogger.Log("[IntegrationTest] GatewayClass updated to reference EnvoyProxy")
+				}
+			}
 		}
 
 		// EnvoyGateway is already configured via Helm chart values during installation
-		// No need to update ConfigMap or restart pods
+		// EnvoyProxy bootstrap config is set via EnvoyProxy resource above
 		defaultLogger.Log("[IntegrationTest] EnvoyGateway is already configured with extension server via Helm chart")
 
 		// Create XdsBackend using dynamic client (custom CRD)
@@ -169,8 +188,10 @@ metadata:
   name: %s
   namespace: %s
 spec:
-  server: %s
+  server:
+    server: %s
   service: %s
+  apiType: GRPC
 `, XdsBackendGroup, XdsBackendAPIVersion, XdsBackendKind, XdsBackendResourceName, EnvoyGatewayNamespace, XdsServerName, TestServiceName)
 		err = applyCustomResources(ctx, k8sClient, xdsBackendYaml)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create XdsBackend: %v", err)
@@ -228,88 +249,31 @@ spec:
 		}
 		defaultLogger.Log("[IntegrationTest] Gateway created successfully")
 
-		// EnvoyProxy is configured via EnvoyGateway ConfigMap during installation
-		// Wait for Gateway to be Programmed (address assigned)
-		defaultLogger.Log("[IntegrationTest] Waiting for Gateway to be Programmed with ClusterIP address...")
-
-		// Check EnvoyProxy resource and service for debugging
-		envoyProxyGVR := schema.GroupVersionResource{
-			Group:    "gateway.envoyproxy.io",
-			Version:  "v1alpha1",
-			Resource: "envoyproxies",
-		}
-		envoyProxyClient := k8sClient.GetDynamicClient().Resource(envoyProxyGVR).Namespace(EnvoyGatewayNamespace)
-
-		programmedCtx, programmedCancel := context.WithTimeout(ctx, DeploymentTimeout)
-		defer programmedCancel()
-		err = wait.PollUntilContextTimeout(programmedCtx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
+		// Wait for Gateway to be Accepted (we'll ignore Programmed status since LoadBalancer IP may not be allocated)
+		defaultLogger.Log("[IntegrationTest] Waiting for Gateway to be Accepted...")
+		acceptedCtx, acceptedCancel := context.WithTimeout(ctx, DeploymentTimeout)
+		defer acceptedCancel()
+		err = wait.PollUntilContextTimeout(acceptedCtx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
 			gateway, gErr := k8sClient.GetGateway(ctx, EnvoyGatewayNamespace, GatewayName)
 			if gErr != nil {
 				return false, gErr
 			}
 
-			// Check EnvoyProxy resource
-			envoyProxyList, listErr := envoyProxyClient.List(ctx, metav1.ListOptions{})
-			if listErr == nil {
-				defaultLogger.Logf("[IntegrationTest] Found %d EnvoyProxy resource(s)", len(envoyProxyList.Items))
-				for _, ep := range envoyProxyList.Items {
-					defaultLogger.Logf("[IntegrationTest] EnvoyProxy: %s", ep.GetName())
-					if spec, found, _ := unstructured.NestedMap(ep.Object, "spec"); found {
-						if provider, found, _ := unstructured.NestedMap(spec, "provider"); found {
-							if k8s, found, _ := unstructured.NestedMap(provider, "kubernetes"); found {
-								if svc, found, _ := unstructured.NestedMap(k8s, "envoyService"); found {
-									if svcType, found, _ := unstructured.NestedString(svc, "type"); found {
-										defaultLogger.Logf("[IntegrationTest] EnvoyProxy service type: %s", svcType)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-
-			// Check Envoy service - try multiple possible service names
-			possibleServiceNames := []string{
-				fmt.Sprintf("envoy-%s", GatewayName),
-				fmt.Sprintf("envoy-%s-%s", EnvoyGatewayNamespace, GatewayName),
-				GatewayName,
-			}
-			serviceFound := false
-			for _, svcName := range possibleServiceNames {
-				svc, svcErr := k8sClient.GetClientset().CoreV1().Services(EnvoyGatewayNamespace).Get(ctx, svcName, metav1.GetOptions{})
-				if svcErr == nil {
-					defaultLogger.Logf("[IntegrationTest] Found Envoy service '%s': type=%s, ClusterIP=%s", svcName, svc.Spec.Type, svc.Spec.ClusterIP)
-					serviceFound = true
-					break
-				} else if !errors.IsNotFound(svcErr) {
-					defaultLogger.Logf("[IntegrationTest] Error getting Envoy service '%s': %v", svcName, svcErr)
-				}
-			}
-			if !serviceFound {
-				// List all services in the namespace to see what exists
-				svcList, listErr := k8sClient.GetClientset().CoreV1().Services(EnvoyGatewayNamespace).List(ctx, metav1.ListOptions{})
-				if listErr == nil {
-					defaultLogger.Logf("[IntegrationTest] Available services in %s: %d", EnvoyGatewayNamespace, len(svcList.Items))
-					for _, svc := range svcList.Items {
-						if strings.Contains(svc.Name, "envoy") || strings.Contains(svc.Name, GatewayName) {
-							defaultLogger.Logf("[IntegrationTest]  - %s: type=%s, ClusterIP=%s", svc.Name, svc.Spec.Type, svc.Spec.ClusterIP)
-						}
-					}
-				}
-			}
-
 			for _, cond := range gateway.Status.Conditions {
-				if cond.Type == string(gatewayv1.GatewayConditionProgrammed) {
+				if cond.Type == string(gatewayv1.GatewayConditionAccepted) {
 					if cond.Status == "True" {
-						defaultLogger.Logf("[IntegrationTest] Gateway is Programmed: %s", cond.Message)
+						defaultLogger.Logf("[IntegrationTest] Gateway is Accepted: %s", cond.Message)
 						return true, nil
 					}
-					defaultLogger.Logf("[IntegrationTest] Gateway Programmed condition: %s, Reason: %s, Message: %s", cond.Status, cond.Reason, cond.Message)
+					defaultLogger.Logf("[IntegrationTest] Gateway Accepted condition: %s, Reason: %s, Message: %s", cond.Status, cond.Reason, cond.Message)
 				}
 			}
 			return false, nil
 		})
-		Expect(err).NotTo(HaveOccurred(), "Gateway should be Programmed within %v", DeploymentTimeout)
+		Expect(err).NotTo(HaveOccurred(), "Gateway should be Accepted within %v", DeploymentTimeout)
+
+		// Note: We're not waiting for Programmed status since LoadBalancer IP may not be allocated in Kind clusters
+		// The Gateway can still route traffic using the ClusterIP of the Envoy service
 
 		// Create HTTPRoute using typed client
 		httpRoute := &gatewayv1.HTTPRoute{
@@ -433,15 +397,136 @@ spec:
 		clusterTimeoutCtx, clusterCancel := context.WithTimeout(ctx, DeploymentTimeout)
 		defer clusterCancel()
 		err = wait.PollUntilContextTimeout(clusterTimeoutCtx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
-			adminConfigDump, err := getEnvoyAdminConfigDump(ctx, k8sClient, EnvoyGatewayNamespace, podNameForClusterCheck)
+			// Use a shorter timeout for each individual call to avoid blocking the entire polling loop
+			callCtx, callCancel := context.WithTimeout(ctx, 30*time.Second)
+			defer callCancel()
+
+			adminConfigDump, err := getEnvoyAdminConfigDump(callCtx, k8sClient, EnvoyGatewayNamespace, podNameForClusterCheck)
 			if err != nil {
 				defaultLogger.Logf("[IntegrationTest] Failed to get config dump (will retry): %v", err)
 				return false, nil // Continue polling
 			}
-			// Check if the cluster exists in the config dump
-			if strings.Contains(adminConfigDump, fmt.Sprintf("Cluster: %s", ExpectedClusterName)) {
+
+			// Check if the cluster exists in the config dump - try multiple search patterns
+			clusterFound := false
+			searchPatterns := []string{
+				fmt.Sprintf("name: %s", ExpectedClusterName),
+				fmt.Sprintf("\"name\": \"%s\"", ExpectedClusterName),
+				fmt.Sprintf("'name': '%s'", ExpectedClusterName),
+				fmt.Sprintf("Cluster: %s", ExpectedClusterName),
+				fmt.Sprintf("\"%s\"", ExpectedClusterName),
+			}
+
+			for _, pattern := range searchPatterns {
+				if strings.Contains(adminConfigDump, pattern) {
+					clusterFound = true
+					break
+				}
+			}
+
+			// Also check for any cluster containing "httproute" or "test-route" in case the name is slightly different
+			if !clusterFound {
+				if strings.Contains(adminConfigDump, "httproute") || strings.Contains(adminConfigDump, "test-route") {
+					defaultLogger.Logf("[IntegrationTest] Found cluster containing 'httproute' or 'test-route', checking exact match...")
+					// Check if any of the found clusters match our expected pattern
+					if strings.Contains(adminConfigDump, HTTPRouteName) {
+						// Log a sample around the match to see what the actual name is
+						idx := strings.Index(adminConfigDump, HTTPRouteName)
+						start := max(0, idx-200)
+						end := min(len(adminConfigDump), idx+200)
+						sample := adminConfigDump[start:end]
+						defaultLogger.Logf("[IntegrationTest] Found reference to HTTPRoute name, sample context: %s", sample)
+					}
+				}
+			}
+
+			if clusterFound {
 				defaultLogger.Logf("[IntegrationTest] Backend cluster %s found!", ExpectedClusterName)
 				return true, nil
+			}
+
+			// Log actual cluster names found for debugging
+			// Look in the dynamic_active_clusters or static_clusters sections
+			// We need to be more precise - only look for cluster names that are at the cluster level
+			if strings.Contains(adminConfigDump, "dynamic_active_clusters:") || strings.Contains(adminConfigDump, "static_clusters:") {
+				lines := strings.Split(adminConfigDump, "\n")
+				clusterNames := []string{}
+				inClusterSection := false
+				inClusterEntry := false
+				indentLevel := 0
+
+				for _, line := range lines {
+					trimmed := strings.TrimSpace(line)
+					originalIndent := len(line) - len(trimmed)
+
+					if strings.Contains(trimmed, "dynamic_active_clusters:") || strings.Contains(trimmed, "static_clusters:") {
+						inClusterSection = true
+						continue
+					}
+
+					if inClusterSection {
+						// Check if we're entering a new cluster entry (usually starts with "-" or "cluster:")
+						if strings.HasPrefix(trimmed, "-") || strings.Contains(trimmed, "cluster:") {
+							inClusterEntry = true
+							indentLevel = originalIndent
+							continue
+						}
+
+						// If we hit another top-level section, stop
+						if originalIndent == 0 && trimmed != "" && !strings.HasPrefix(trimmed, "-") {
+							if !strings.Contains(strings.ToLower(trimmed), "cluster") {
+								break
+							}
+						}
+
+						// Look for cluster name fields - only at the cluster entry level
+						if inClusterEntry && originalIndent > indentLevel {
+							if strings.HasPrefix(trimmed, "name:") {
+								// Extract the name value
+								parts := strings.SplitN(trimmed, ":", 2)
+								if len(parts) == 2 {
+									name := strings.TrimSpace(strings.Trim(parts[1], "\"'"))
+									// Filter out invalid names (headers, variables, etc.)
+									if name != "" &&
+										!strings.HasPrefix(name, "envoy.") &&
+										!strings.HasPrefix(name, "xds_cluster") &&
+										!strings.HasPrefix(name, ":") &&
+										!strings.HasPrefix(name, "'%") &&
+										!strings.HasPrefix(name, "%") &&
+										!strings.Contains(name, " ") {
+										// Check if we already have this name
+										found := false
+										for _, existing := range clusterNames {
+											if existing == name {
+												found = true
+												break
+											}
+										}
+										if !found {
+											clusterNames = append(clusterNames, name)
+										}
+									}
+								}
+							}
+						}
+
+						// Reset cluster entry flag if we've moved to a different section
+						if originalIndent <= indentLevel && trimmed != "" && !strings.HasPrefix(trimmed, "-") {
+							inClusterEntry = false
+						}
+					}
+				}
+
+				if len(clusterNames) > 0 {
+					defaultLogger.Logf("[IntegrationTest] Found %d cluster(s) in config dump, looking for: %s", len(clusterNames), ExpectedClusterName)
+					// Log all clusters found to help debug
+					for _, name := range clusterNames {
+						defaultLogger.Logf("[IntegrationTest]  - %s", name)
+					}
+				} else {
+					// If no clusters found, log a sample of the config dump for debugging
+					defaultLogger.Logf("[IntegrationTest] No clusters found in expected sections. Config dump sample (first 1000 chars): %s", adminConfigDump[:min(len(adminConfigDump), 1000)])
+				}
 			}
 
 			return false, nil

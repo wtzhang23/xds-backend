@@ -9,12 +9,11 @@ import (
 
 var _ types.XdsBackendConfig = (*XdsBackend)(nil)
 
+// XdsBackend is a custom [BackendRef](https://gateway.envoyproxy.io/docs/api/extension_types/#backendref)
+// for Envoy Gateway that allows configuring backends to use an external EDS server for endpoint discovery.
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Namespaced
 // +kubebuilder:subresource:status
-
-// XdsBackend is a custom [BackendRef](https://gateway.envoyproxy.io/docs/api/extension_types/#backendref)
-// for Envoy Gateway that allows configuring backends to use an external EDS server for endpoint discovery.
 type XdsBackend struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
@@ -24,6 +23,7 @@ type XdsBackend struct {
 }
 
 // XdsBackendSpec defines the xDS server and resource to use to fetch endpoints for the backend.
+// +kubebuilder:object:generate=true
 type XdsBackendSpec struct {
 	// Service is the name of the service to use to fetch endpoints for the backend.
 	// If not specified, the default name used by Envoy Gateway for the backend will be used
@@ -35,7 +35,7 @@ type XdsBackendSpec struct {
 	// ApiType is the protocol to use to fetch endpoints for the backend.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=GRPC;DELTA_GRPC;REST
-	// +kubebuilder:default=EDS
+	// +kubebuilder:default=GRPC
 	ApiType ApiType `json:"apiType"`
 
 	// Server is the name of the xDS server to use to fetch endpoints for the backend. This name
@@ -61,6 +61,8 @@ const (
 	ApiTypeRest      ApiType = "REST"
 )
 
+// PathConfigSource is a config source that fetches endpoints for the backend from a local file.
+// +kubebuilder:object:generate=true
 type PathConfigSource struct {
 	// Path is a path to the file to fetch endpoints for the backend. This should be used
 	// only to fetch endpoints for the backend from a local file.
@@ -73,6 +75,8 @@ type PathConfigSource struct {
 	WatchedDir string `json:"watchedDir,omitempty"`
 }
 
+// ServerConfigSource is a config source that fetches endpoints for the backend from a remote xDS server.
+// +kubebuilder:object:generate=true
 type ServerConfigSource struct {
 	// Server is the name of the xDS server to use to fetch endpoints for the backend. This name
 	// must match the name configured in the xDS backend extension server.

@@ -321,6 +321,7 @@ func (k *K8sClient) applyUnstructured(ctx context.Context, obj *unstructured.Uns
 	clusterScopedKinds := map[string]bool{
 		"Gateway":            true,
 		"EnvoyGateway":       true,
+		"EnvoyProxy":         true,
 		"GatewayClass":       true,
 		"ClusterRole":        true,
 		"ClusterRoleBinding": true,
@@ -388,6 +389,7 @@ func (k *K8sClient) getResourceClient(gvr schema.GroupVersionResource, kind, nam
 	// Cluster-scoped resources
 	clusterScopedKinds := map[string]bool{
 		"EnvoyGateway":       true,
+		"EnvoyProxy":         true,
 		"Gateway":            true,
 		"GatewayClass":       true,
 		"ClusterRole":        true,
@@ -420,6 +422,9 @@ func (k *K8sClient) getGVR(gvk *schema.GroupVersionKind) schema.GroupVersionReso
 	case "EnvoyGateway":
 		// Envoy Gateway uses "envoygateways" as the resource name
 		gvr.Resource = "envoygateways"
+	case "EnvoyProxy":
+		// EnvoyProxy uses "envoyproxies" as the resource name
+		gvr.Resource = "envoyproxies"
 	case "XdsBackend":
 		// XdsBackend uses "xdsbackends" as the resource name
 		gvr.Resource = "xdsbackends"

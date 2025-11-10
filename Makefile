@@ -15,7 +15,7 @@ generate-proto:
 .PHONY: generate-controller-gen
 generate-controller-gen:
 	mkdir -p charts/xds-backend/crds
-	go tool controller-gen object crd paths="./api/..." output:crd:dir=./charts/xds-backend/crds
+	go tool controller-gen object crd paths="./api/..." output:crd:dir=./charts/xds-backend/crds output:object:dir=./api/v1alpha1
 
 .PHONY: buf-dep-update
 buf-dep-update:

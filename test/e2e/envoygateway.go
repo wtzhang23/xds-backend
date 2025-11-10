@@ -169,26 +169,38 @@ func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *
 				"provider": map[string]interface{}{
 					"type": "Kubernetes",
 					"kubernetes": map[string]interface{}{
-						"envoyService": map[string]interface{}{
-							"type": "ClusterIP",
-						},
 						"envoyProxy": map[string]interface{}{
 							"bootstrap": map[string]interface{}{
-								"value": fmt.Sprintf(`static_resources:
-  clusters:
-- name: %s
-    type: STRICT_DNS
-    connect_timeout: 5s
-    load_assignment:
-      cluster_name: %s
-      endpoints:
-      - lb_endpoints:
-        - endpoint:
-            address:
-              socket_address:
-                address: %s
-                port_value: %d
-`, XdsServerName, XdsServerName, xdsServerFQDN, xdsServerPort),
+								"value": fmt.Sprintf(`{
+  "static_resources": {
+    "clusters": [
+      {
+        "name": "%s",
+        "type": "STRICT_DNS",
+        "connect_timeout": "5s",
+        "load_assignment": {
+          "cluster_name": "%s",
+          "endpoints": [
+            {
+              "lb_endpoints": [
+                {
+                  "endpoint": {
+                    "address": {
+                      "socket_address": {
+                        "address": "%s",
+                        "port_value": %d
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}`, XdsServerName, XdsServerName, xdsServerFQDN, xdsServerPort),
 							},
 						},
 					},
@@ -219,9 +231,6 @@ func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *
 					},
 				},
 			},
-		},
-		"service": map[string]interface{}{
-			"type": "ClusterIP",
 		},
 		"deployment": map[string]interface{}{
 			"ports": []map[string]interface{}{
