@@ -11,15 +11,18 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclient "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
@@ -31,6 +34,7 @@ type K8sClient struct {
 	dynamic       dynamic.Interface
 	gatewayClient gatewayclient.Interface
 	config        *rest.Config
+	mapper        meta.RESTMapper
 	logger        testLogger
 }
 
@@ -56,11 +60,17 @@ func NewK8sClient(kubeconfigPath string) (*K8sClient, error) {
 		return nil, fmt.Errorf("failed to create gateway client: %w", err)
 	}
 
+	// Create RESTMapper for automatic GVR conversion and scope detection
+	discoveryClient := clientset.Discovery()
+	cachedDiscoveryClient := memory.NewMemCacheClient(discoveryClient)
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(cachedDiscoveryClient)
+
 	return &K8sClient{
 		clientset:     clientset,
 		dynamic:       dynamicClient,
 		gatewayClient: gatewayClient,
 		config:        config,
+		mapper:        mapper,
 		logger:        defaultLogger,
 	}, nil
 }
@@ -189,77 +199,52 @@ func (k *K8sClient) applyUnstructured(ctx context.Context, obj *unstructured.Uns
 
 // Helper methods for unstructured resources using dynamic client
 func (k *K8sClient) getUnstructuredResource(ctx context.Context, obj *unstructured.Unstructured, gvk *schema.GroupVersionKind) (*unstructured.Unstructured, error) {
-	gvr := k.getGVR(gvk)
-	resourceClient := k.getResourceClient(gvr, gvk.Kind, obj.GetNamespace())
+	resourceClient, err := k.getResourceClient(ctx, gvk, obj.GetNamespace())
+	if err != nil {
+		return nil, err
+	}
 	return resourceClient.Get(ctx, obj.GetName(), metav1.GetOptions{})
 }
 
 func (k *K8sClient) createUnstructuredResource(ctx context.Context, obj *unstructured.Unstructured, gvk *schema.GroupVersionKind) error {
-	gvr := k.getGVR(gvk)
-	resourceClient := k.getResourceClient(gvr, gvk.Kind, obj.GetNamespace())
-	_, err := resourceClient.Create(ctx, obj, metav1.CreateOptions{})
+	resourceClient, err := k.getResourceClient(ctx, gvk, obj.GetNamespace())
+	if err != nil {
+		return err
+	}
+	_, err = resourceClient.Create(ctx, obj, metav1.CreateOptions{})
 	return err
 }
 
 func (k *K8sClient) updateUnstructuredResource(ctx context.Context, obj *unstructured.Unstructured, gvk *schema.GroupVersionKind) error {
-	gvr := k.getGVR(gvk)
-	resourceClient := k.getResourceClient(gvr, gvk.Kind, obj.GetNamespace())
+	resourceClient, err := k.getResourceClient(ctx, gvk, obj.GetNamespace())
+	if err != nil {
+		return err
+	}
 
-	_, err := resourceClient.Apply(ctx, obj.GetName(), obj, metav1.ApplyOptions{
+	_, err = resourceClient.Apply(ctx, obj.GetName(), obj, metav1.ApplyOptions{
 		FieldManager: "xds-backend-e2e-test",
 	}, "")
 	return err
 }
 
 // getResourceClient returns the appropriate resource client (namespaced or cluster-scoped)
-func (k *K8sClient) getResourceClient(gvr schema.GroupVersionResource, kind, namespace string) dynamic.ResourceInterface {
-	baseClient := k.dynamic.Resource(gvr)
-	clusterScopedKinds := map[string]bool{
-		"EnvoyGateway":       true,
-		"GatewayClass":       true,
-		"ClusterRole":        true,
-		"ClusterRoleBinding": true,
-		"Namespace":          true,
-		"Node":               true,
-		"PersistentVolume":   true,
-	}
-	if clusterScopedKinds[kind] {
-		return baseClient
-	}
-	return baseClient.Namespace(namespace)
-}
-
-// getGVR converts GroupVersionKind to GroupVersionResource with proper resource name
-func (k *K8sClient) getGVR(gvk *schema.GroupVersionKind) schema.GroupVersionResource {
-	gvr := schema.GroupVersionResource{
-		Group:    gvk.Group,
-		Version:  gvk.Version,
-		Resource: strings.ToLower(gvk.Kind) + "s", // Simple pluralization
+// Uses RESTMapper to automatically determine GVR and scope
+func (k *K8sClient) getResourceClient(ctx context.Context, gvk *schema.GroupVersionKind, namespace string) (dynamic.ResourceInterface, error) {
+	// Use RESTMapper to get GVR from GVK (handles pluralization automatically)
+	mapping, err := k.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get REST mapping for %s: %w", gvk, err)
 	}
 
-	// Handle special cases for resource names
-	switch gvk.Kind {
-	case "EnvoyGateway":
-		// Envoy Gateway uses "envoygateways" as the resource name
-		gvr.Resource = "envoygateways"
-	case "EnvoyProxy":
-		// EnvoyProxy uses "envoyproxies" as the resource name
-		gvr.Resource = "envoyproxies"
-	case "XdsBackend":
-		// XdsBackend uses "xdsbackends" as the resource name
-		gvr.Resource = "xdsbackends"
-	case "Gateway":
-		// Gateway API uses "gateways" as the resource name
-		gvr.Resource = "gateways"
-	case "GatewayClass":
-		// Gateway API uses "gatewayclasses" as the resource name
-		gvr.Resource = "gatewayclasses"
-	case "HTTPRoute":
-		// Gateway API uses "httproutes" as the resource name
-		gvr.Resource = "httproutes"
-	}
+	baseClient := k.dynamic.Resource(mapping.Resource)
 
-	return gvr
+	// RESTMapper tells us if the resource is namespaced
+	if mapping.Scope.Name() == meta.RESTScopeNameRoot {
+		// Cluster-scoped resource
+		return baseClient, nil
+	}
+	// Namespaced resource
+	return baseClient.Namespace(namespace), nil
 }
 
 // WaitForCRD waits for a CRD to be installed and established

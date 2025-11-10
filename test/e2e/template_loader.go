@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v2"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 //go:embed templates/*
@@ -38,10 +39,13 @@ type TemplateData struct {
 	ImagePullPolicy                string
 	EnvoyGatewayContainerPort      int
 	EnvoyGatewayHTTPSContainerPort int
+	EnvoyGatewayHostPort           int
+	EnvoyGatewayHTTPSHostPort      int
 	TestServicePort                int
 	TestServiceIP                  string // IP address of the test service
 	EdsConfigPath                  string // Path to EDS config file in Envoy pod
 	EdsConfigMapName               string // Name of ConfigMap containing EDS config
+	ClusterName                    string // Name of the kind cluster
 }
 
 // indent adds indentation to each line of a string
@@ -103,27 +107,6 @@ func LoadTemplate(templatePath string, data TemplateData) (string, error) {
 	return result, nil
 }
 
-// convertToMapStringInterface recursively converts map[interface{}]interface{} to map[string]interface{}
-// This is needed because yaml.v2 unmarshals to map[interface{}]interface{}, but Helm needs map[string]interface{}
-func convertToMapStringInterface(in interface{}) interface{} {
-	switch v := in.(type) {
-	case map[interface{}]interface{}:
-		result := make(map[string]interface{})
-		for k, val := range v {
-			result[fmt.Sprintf("%v", k)] = convertToMapStringInterface(val)
-		}
-		return result
-	case []interface{}:
-		result := make([]interface{}, len(v))
-		for i, val := range v {
-			result[i] = convertToMapStringInterface(val)
-		}
-		return result
-	default:
-		return in
-	}
-}
-
 // LoadHelmValues loads Helm values from a YAML template and returns them as a map
 func LoadHelmValues(templatePath string, data TemplateData) (map[string]interface{}, error) {
 	// Load and render the template
@@ -132,17 +115,11 @@ func LoadHelmValues(templatePath string, data TemplateData) (map[string]interfac
 		return nil, fmt.Errorf("failed to load template: %w", err)
 	}
 
-	// Parse YAML into map (yaml.v2 produces map[interface{}]interface{})
-	var rawValues interface{}
-	if err := yaml.Unmarshal([]byte(yamlContent), &rawValues); err != nil {
+	// Parse YAML into map[string]interface{} directly using k8s yaml library
+	// This avoids the need for conversion from map[interface{}]interface{}
+	var values map[string]interface{}
+	if err := k8syaml.Unmarshal([]byte(yamlContent), &values); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
-	}
-
-	// Convert to map[string]interface{} for Helm compatibility
-	converted := convertToMapStringInterface(rawValues)
-	values, ok := converted.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("expected map[string]interface{}, got %T", converted)
 	}
 
 	// Write rendered Helm values to file for debugging
@@ -167,7 +144,7 @@ func writeRenderedConfig(templatePath, content string) error {
 	// Get the template filename without path
 	templateName := filepath.Base(templatePath)
 	// Add timestamp to avoid conflicts
-	timestamp := time.Now().Format("20060102-150405")
+	timestamp := time.Now().Format(LogTimestampFormat)
 	outputFilename := fmt.Sprintf("%s-%s", timestamp, templateName)
 	outputPath := filepath.Join(renderedDir, outputFilename)
 
@@ -187,7 +164,7 @@ func writeRenderedHelmValues(templatePath string, values map[string]interface{})
 	// Get the template filename without path
 	templateName := filepath.Base(templatePath)
 	// Add timestamp to avoid conflicts
-	timestamp := time.Now().Format("20060102-150405")
+	timestamp := time.Now().Format(LogTimestampFormat)
 	outputFilename := fmt.Sprintf("%s-%s.yaml", timestamp, templateName)
 	outputPath := filepath.Join(renderedDir, outputFilename)
 

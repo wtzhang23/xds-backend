@@ -9,3 +9,8 @@ func isKindAvailable() bool {
 	_, err := exec.LookPath("kind")
 	return err == nil
 }
+
+// ptrOf returns a pointer to the given value
+func ptrOf[T any](t T) *T {
+	return &t
+}

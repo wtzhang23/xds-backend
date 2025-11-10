@@ -228,11 +228,6 @@ func applyYAML(ctx context.Context, k8sClient *K8sClient, yamlContent string) er
 	return nil
 }
 
-// ptrOf returns a pointer to the given value
-func ptrOf[T any](t T) *T {
-	return &t
-}
-
 // getEnvoyAdminConfigDump fetches the Envoy admin config dump from a pod
 func getEnvoyAdminConfigDump(ctx context.Context, k8sClient *K8sClient, namespace, podName string) (string, error) {
 	adminPort := EnvoyAdminPort

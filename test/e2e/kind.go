@@ -6,8 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
 
+	"gopkg.in/yaml.v2"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kindcluster "sigs.k8s.io/kind/pkg/cluster"
@@ -59,32 +59,22 @@ func (k *KindCluster) Create(ctx context.Context) error {
 	}
 	k.logger.Logf("[KindCluster] Cluster %s does not exist, creating new cluster...", k.name)
 
-	// Create kind cluster config
-	config := &v1alpha4.Cluster{
-		Name: k.name,
-		Nodes: []v1alpha4.Node{
-			{
-				Role: v1alpha4.ControlPlaneRole,
-				KubeadmConfigPatches: []string{
-					`kind: InitConfiguration
-nodeRegistration:
-  kubeletExtraArgs:
-    node-labels: "ingress-ready=true"`,
-				},
-				ExtraPortMappings: []v1alpha4.PortMapping{
-					{
-						ContainerPort: EnvoyGatewayContainerPort,
-						HostPort:      EnvoyGatewayHostPort,
-						Protocol:      v1alpha4.PortMappingProtocolTCP,
-					},
-					{
-						ContainerPort: EnvoyGatewayHTTPSContainerPort,
-						HostPort:      EnvoyGatewayHTTPSHostPort,
-						Protocol:      v1alpha4.PortMappingProtocolTCP,
-					},
-				},
-			},
-		},
+	// Load kind cluster config from template
+	configYAML, err := LoadTemplate("kind-cluster-config.yaml", TemplateData{
+		ClusterName:                    k.name,
+		EnvoyGatewayContainerPort:      EnvoyGatewayContainerPort,
+		EnvoyGatewayHostPort:           EnvoyGatewayHostPort,
+		EnvoyGatewayHTTPSContainerPort: EnvoyGatewayHTTPSContainerPort,
+		EnvoyGatewayHTTPSHostPort:      EnvoyGatewayHTTPSHostPort,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to load kind cluster config template: %w", err)
+	}
+
+	// Unmarshal YAML into v1alpha4.Cluster
+	config := &v1alpha4.Cluster{}
+	if err := yaml.Unmarshal([]byte(configYAML), config); err != nil {
+		return fmt.Errorf("failed to unmarshal kind cluster config: %w", err)
 	}
 
 	// Create cluster
@@ -183,7 +173,6 @@ func (k *KindCluster) GetKubeconfigPath() string {
 }
 
 // LoadImage loads a Docker image into the kind cluster
-// For now, we use exec as this would require docker client library dependency
 func (k *KindCluster) LoadImage(ctx context.Context, image string) error {
 	k.logger.Logf("[KindCluster] Loading Docker image %s into cluster %s...", image, k.name)
 	// TODO: Replace with docker client library + kind library utilities
@@ -196,16 +185,4 @@ func (k *KindCluster) LoadImage(ctx context.Context, image string) error {
 	}
 	k.logger.Logf("[KindCluster] Successfully loaded image %s", image)
 	return nil
-}
-
-// WaitForPodReady waits for a pod to be ready in a namespace
-// This is a placeholder - actual implementation should use k8s client
-func (k *KindCluster) WaitForPodReady(ctx context.Context, namespace, labelSelector string, timeout time.Duration) error {
-	// This will be handled by the Kubernetes client in other files
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// Wait for the timeout or context cancellation
-	<-timeoutCtx.Done()
-	return fmt.Errorf("timeout waiting for pod to be ready: %w", timeoutCtx.Err())
 }
