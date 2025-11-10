@@ -1,0 +1,14 @@
+apiVersion: v1
+entries:
+  xds-backend:
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2025-11-10T16:06:56.253971758Z"
+    description: Deploy the xDS backend extension server
+    digest: ea5934875ada9a22ce9786fcccc82e8b30484a4a84126d9fb96547d8c4388dfd
+    name: xds-backend
+    type: application
+    urls:
+    - xds-backend-0.1.0.tgz
+    version: 0.1.0
+generated: "2025-11-10T16:06:56.253977238Z"
