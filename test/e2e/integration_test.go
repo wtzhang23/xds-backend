@@ -42,7 +42,7 @@ var _ = Describe("xDS Backend Integration", func() {
 		collectLogs(logCtx, k8sClient)
 	})
 
-	It("should route traffic through Envoy Gateway to test service via xDS EDS", func() {
+	It("should route traffic through Envoy Gateway to test service via file-based EDS", func() {
 		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -68,15 +68,20 @@ var _ = Describe("xDS Backend Integration", func() {
 		})).To(Succeed())
 
 		// Create EnvoyProxy if CRD is available
+		// Include both file-based EDS volumes and fileeds-server static cluster
 		var envoyProxyCreated bool
 		if envoyProxyCRDAvailable {
+			fileEdsServiceFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", FileEdsServiceName, EnvoyGatewayNamespace)
 			envoyProxyCreated = applyTemplate(ctx, k8sClient, "envoyproxy.yaml", TemplateData{
 				GatewayClassName:      GatewayClassName,
 				EnvoyGatewayNamespace: EnvoyGatewayNamespace,
 				EdsConfigMapName:      EdsConfigMapName,
+				FileEdsClusterName:    FileEdsClusterName,
+				FileEdsServiceFQDN:    fileEdsServiceFQDN,
+				FileEdsPort:           FileEdsPort,
 			}) == nil
 			if envoyProxyCreated {
-				time.Sleep(3 * time.Second) // Allow controller to process
+				time.Sleep(EnvoyProxyProcessingDelay)
 			}
 		}
 
@@ -144,6 +149,7 @@ var _ = Describe("xDS Backend Integration", func() {
 			XdsBackendGroup:        XdsBackendGroup,
 			XdsBackendKind:         XdsBackendKind,
 			XdsBackendResourceName: XdsBackendResourceName,
+			HTTPRoutePathPrefix:    HTTPRoutePathPrefixFile,
 		})).To(Succeed())
 
 		// Wait for Gateway and HTTPRoute to be ready
@@ -195,7 +201,7 @@ var _ = Describe("xDS Backend Integration", func() {
 		}
 
 		client := &http.Client{Timeout: HTTPClientTimeout}
-		req, err := http.NewRequest("GET", fmt.Sprintf("http://localhost:%d/", EnvoyProxyPodPort), nil)
+		req, err := http.NewRequest("GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, HTTPRoutePathPrefixFile), nil)
 		Expect(err).NotTo(HaveOccurred())
 		req.Header.Set("Host", "*")
 
@@ -204,6 +210,11 @@ var _ = Describe("xDS Backend Integration", func() {
 		defer resp.Body.Close()
 
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+
+		// Give Envoy time to flush access logs before AfterEach collects them
+		// Envoy access logs are buffered and may take a moment to be written to stdout
+		// We need enough time for the log to be flushed and available via kubectl logs
+		time.Sleep(EnvoyAccessLogFlushDelay)
 	})
 
 	It("should expose metrics endpoint with PostClusterModify metrics", func() {
@@ -254,7 +265,7 @@ var _ = Describe("xDS Backend Integration", func() {
 		}
 
 		// Wait a bit for metrics server to be ready
-		time.Sleep(2 * time.Second)
+		time.Sleep(MetricsCollectionDelay)
 
 		// Fetch metrics endpoint
 		client := &http.Client{Timeout: HTTPClientTimeout}
@@ -299,7 +310,6 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(k8sClient.WaitForCRD(ctx, "httproutes.gateway.networking.k8s.io")).To(Succeed())
 		Expect(k8sClient.WaitForCRD(ctx, "gatewayclasses.gateway.networking.k8s.io")).To(Succeed())
 		Expect(k8sClient.WaitForCRD(ctx, "xdsbackends.xdsbackend.wtzhang23.github.io")).To(Succeed())
-		envoyProxyCRDAvailable := k8sClient.WaitForCRD(ctx, "envoyproxies.gateway.envoyproxy.io") == nil
 
 		// Get test service IP
 		testServiceIP, err := testService.GetServiceClusterIP(ctx, TestNamespace, TestServiceName)
@@ -342,22 +352,8 @@ var _ = Describe("xDS Backend Integration", func() {
 		// Wait for fileeds deployment to be ready
 		Expect(k8sClient.WaitForPodsReady(ctx, EnvoyGatewayNamespace, fmt.Sprintf("app=%s", FileEdsDeploymentName), DeploymentTimeout)).To(Succeed())
 
-		// Create or update EnvoyProxy with bootstrap config for fileeds
-		fileEdsServiceFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", FileEdsServiceName, EnvoyGatewayNamespace)
-		var envoyProxyCreated bool
-		if envoyProxyCRDAvailable {
-			envoyProxyCreated = applyTemplate(ctx, k8sClient, "envoyproxy-fileeds.yaml", TemplateData{
-				GatewayClassName:      GatewayClassName,
-				EnvoyGatewayNamespace: EnvoyGatewayNamespace,
-				EdsConfigMapName:      EdsConfigMapName,
-				FileEdsClusterName:    FileEdsClusterName,
-				FileEdsServiceFQDN:    fileEdsServiceFQDN,
-				FileEdsPort:           FileEdsPort,
-			}) == nil
-			if envoyProxyCreated {
-				time.Sleep(3 * time.Second) // Allow controller to process
-			}
-		}
+		// EnvoyProxy should already have the fileeds-server cluster from the first test
+		// No need to update it again - both clusters are already in the bootstrap
 
 		// Create or update GatewayClass
 		gwc, err := k8sClient.GetGatewayClass(ctx, GatewayClassName)
@@ -370,7 +366,8 @@ var _ = Describe("xDS Backend Integration", func() {
 		}
 
 		// Update GatewayClass to reference EnvoyProxy if needed
-		if envoyProxyCreated && (gwc.Spec.ParametersRef == nil || gwc.Spec.ParametersRef.Name != GatewayClassName) {
+		envoyProxyCRDAvailable := k8sClient.WaitForCRD(ctx, "envoyproxies.gateway.envoyproxy.io") == nil
+		if envoyProxyCRDAvailable && (gwc.Spec.ParametersRef == nil || gwc.Spec.ParametersRef.Name != GatewayClassName) {
 			gwc.Spec.ParametersRef = &gatewayv1.ParametersReference{
 				Group:     gatewayv1.Group("gateway.envoyproxy.io"),
 				Kind:      gatewayv1.Kind("EnvoyProxy"),
@@ -434,6 +431,7 @@ var _ = Describe("xDS Backend Integration", func() {
 			XdsBackendGroup:        XdsBackendGroup,
 			XdsBackendKind:         XdsBackendKind,
 			XdsBackendResourceName: FileEdsXdsBackendResourceName,
+			HTTPRoutePathPrefix:    HTTPRoutePathPrefixEds,
 		})).To(Succeed())
 
 		// Wait for Gateway and HTTPRoute to be ready
@@ -449,8 +447,15 @@ var _ = Describe("xDS Backend Integration", func() {
 
 		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
 			configDump, err := getEnvoyAdminConfigDump(ctx, k8sClient, EnvoyGatewayNamespace, podName)
-			return err == nil && strings.Contains(configDump, FileEdsExpectedClusterName), nil
+			if err != nil {
+				return false, nil
+			}
+			// Check that cluster exists
+			return strings.Contains(configDump, FileEdsExpectedClusterName), nil
 		})).To(Succeed())
+
+		// Give Envoy a moment to process the endpoints
+		time.Sleep(EnvoyEndpointProcessingDelay)
 
 		// Setup port forward and send HTTP request
 		restConfig := k8sClient.GetConfig()
@@ -485,7 +490,7 @@ var _ = Describe("xDS Backend Integration", func() {
 		}
 
 		client := &http.Client{Timeout: HTTPClientTimeout}
-		req, err := http.NewRequest("GET", fmt.Sprintf("http://localhost:%d/", EnvoyProxyPodPort), nil)
+		req, err := http.NewRequest("GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, HTTPRoutePathPrefixEds), nil)
 		Expect(err).NotTo(HaveOccurred())
 		req.Header.Set("Host", "*")
 
@@ -494,6 +499,11 @@ var _ = Describe("xDS Backend Integration", func() {
 		defer resp.Body.Close()
 
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+
+		// Give Envoy time to flush access logs before AfterEach collects them
+		// Envoy access logs are buffered and may take a moment to be written to stdout
+		// We need enough time for the log to be flushed and available via kubectl logs
+		time.Sleep(EnvoyAccessLogFlushDelay)
 	})
 })
 
@@ -574,7 +584,7 @@ func getEnvoyAdminConfigDump(ctx context.Context, k8sClient *K8sClient, namespac
 		return "", fmt.Errorf("port forward error: %w", err)
 	case <-readyChan:
 		// Give Envoy admin API a moment to be ready
-		time.Sleep(2 * time.Second)
+		time.Sleep(EnvoyAdminAPIReadyDelay)
 	}
 
 	adminURL := fmt.Sprintf("http://localhost:%d%s", EnvoyAdminPortForwardPort, adminPath)

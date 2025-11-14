@@ -31,6 +31,7 @@ type TemplateData struct {
 	GatewayClassName               string
 	GatewayName                    string
 	HTTPRouteName                  string
+	HTTPRoutePathPrefix            string
 	GatewayListenerName            string
 	GatewayListenerPort            int
 	ExtensionServerFQDN            string

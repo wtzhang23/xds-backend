@@ -13,8 +13,12 @@ import (
 	pb "github.com/envoyproxy/gateway/proto/extension"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/wtzhang23/xds-backend/internal/handler"
+	"github.com/wtzhang23/xds-backend/internal/interceptors"
 	"github.com/wtzhang23/xds-backend/pkg/server"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
@@ -45,7 +49,10 @@ func startGRPCServer(grpcAddress string, logger *slog.Logger) error {
 	var opts []grpc.ServerOption
 	opts = append(opts, grpc.ChainUnaryInterceptor(
 		metricsUnaryInterceptor(),
-		loggingUnaryInterceptor(logger),
+		interceptors.LoggingUnaryInterceptor(logger),
+	))
+	opts = append(opts, grpc.ChainStreamInterceptor(
+		interceptors.LoggingStreamInterceptor(logger),
 	))
 	grpcServer = grpc.NewServer(opts...)
 	extensionServer := server.NewServer(
@@ -53,6 +60,15 @@ func startGRPCServer(grpcAddress string, logger *slog.Logger) error {
 		&handler.XdsBackendHandler{},
 	)
 	pb.RegisterEnvoyGatewayExtensionServer(grpcServer, extensionServer)
+
+	// Register reflection service for gRPC CLI tools
+	reflection.Register(grpcServer)
+
+	// Register health check service
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+
 	return grpcServer.Serve(lis)
 }
 

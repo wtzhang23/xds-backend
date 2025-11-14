@@ -9,15 +9,9 @@ spec:
     kubernetes:
       envoyDeployment:
         container:
-          volumeMounts:
-          - mountPath: /etc/envoy/eds
-            name: eds
-            readOnly: true
+          volumeMounts: []
         pod:
-          volumes:
-          - name: eds
-            configMap:
-              name: {{ .EdsConfigMapName }}
+          volumes: []
   bootstrap:
     type: Merge
     value: |

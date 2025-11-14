@@ -27,7 +27,7 @@ spec:
         - --file-path
         - {{ .FileEdsConfigPath }}
         - --log-level
-        - "info"
+        - "debug"
         ports:
         - containerPort: {{ .FileEdsPort }}
           name: grpc

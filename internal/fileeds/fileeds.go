@@ -12,7 +12,6 @@ import (
 	"syscall"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
-	_ "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	endpointv3 "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
 	discoveryv3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	endpointservice "github.com/envoyproxy/go-control-plane/envoy/service/endpoint/v3"
@@ -21,9 +20,13 @@ import (
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
 	xdsv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	"github.com/fsnotify/fsnotify"
+	"github.com/wtzhang23/xds-backend/internal/interceptors"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/reflection"
 	"google.golang.org/protobuf/encoding/protojson"
-	"gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v3"
 )
 
 const catchAllHash = "catch-all-hash"
@@ -42,10 +45,23 @@ func StartEdsServer(host string, port int, filePath string, logger *slog.Logger)
 		return err
 	}
 	server := xdsv3.NewServer(context.Background(), snapshotCache, nil)
-	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
-		loggingUnaryInterceptor(logger),
-	))
+	grpcServer = grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			interceptors.LoggingUnaryInterceptor(logger),
+		),
+		grpc.ChainStreamInterceptor(
+			interceptors.LoggingStreamInterceptor(logger),
+		),
+	)
 	endpointservice.RegisterEndpointDiscoveryServiceServer(grpcServer, server)
+
+	// Register reflection service for gRPC CLI tools
+	reflection.Register(grpcServer)
+
+	// Register health check service
+	healthServer := health.NewServer()
+	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
 	return grpcServer.Serve(lis)
 }
@@ -65,6 +81,7 @@ func createAndStartCache(filePath string, logger *slog.Logger) (cachev3.Cache, e
 			if err != nil {
 				return err
 			}
+			logger.Debug("Unmarshalling YAML", slog.String("content", string(content)))
 			var asAny map[string]any
 			err = yaml.Unmarshal(content, &asAny)
 			if err != nil {

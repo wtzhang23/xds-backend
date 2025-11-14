@@ -18,3 +18,21 @@ spec:
           - name: eds
             configMap:
               name: {{ .EdsConfigMapName }}
+  bootstrap:
+    type: Merge
+    value: |
+      static_resources:
+        clusters:
+        - name: {{ .FileEdsClusterName }}
+          type: STRICT_DNS
+          connect_timeout: 5s
+          load_assignment:
+            cluster_name: {{ .FileEdsClusterName }}
+            endpoints:
+            - lb_endpoints:
+              - endpoint:
+                  address:
+                    socket_address:
+                      address: {{ .FileEdsServiceFQDN }}
+                      port_value: {{ .FileEdsPort }}
+          http2_protocol_options: {}
