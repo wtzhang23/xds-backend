@@ -137,18 +137,19 @@ func createGRPCServer(logger *slog.Logger, tlsConfig *tlsconfig.Config, extensio
 	return grpcServer
 }
 
-// registerServices registers all services (extension server, reflection, health check) on the gRPC server
+// registerServices registers all services (extension server, health check, reflection) on the gRPC server
+// Reflection is registered last so it can discover all other services
 func registerServices(grpcServer *grpc.Server, extensionServer *server.Server) {
 	// Register the extension server
 	pb.RegisterEnvoyGatewayExtensionServer(grpcServer, extensionServer)
-
-	// Register reflection service for gRPC CLI tools
-	reflection.Register(grpcServer)
 
 	// Register health check service
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+
+	// Register reflection service for gRPC CLI tools (last, so it can discover all services)
+	reflection.Register(grpcServer)
 }
 
 func startHTTPServer(httpAddress string, log *slog.Logger) error {

@@ -611,7 +611,7 @@ var _ = Describe("xDS Backend Integration", func() {
 		}
 
 		// Connect to gRPC server over TLS
-		conn, err := grpc.Dial(
+		conn, err := grpc.NewClient(
 			fmt.Sprintf("localhost:%d", localPort),
 			grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
 		)

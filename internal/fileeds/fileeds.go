@@ -102,13 +102,13 @@ func createEdsGRPCServer(snapshotCache cachev3.Cache, logger *slog.Logger, tlsCo
 	grpcServer := grpc.NewServer(opts...)
 	endpointservice.RegisterEndpointDiscoveryServiceServer(grpcServer, server)
 
-	// Register reflection service for gRPC CLI tools
-	reflection.Register(grpcServer)
-
 	// Register health check service
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+
+	// Register reflection service for gRPC CLI tools (last, so it can discover all services)
+	reflection.Register(grpcServer)
 
 	return grpcServer
 }
