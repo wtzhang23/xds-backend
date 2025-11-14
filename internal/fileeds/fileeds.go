@@ -92,6 +92,7 @@ func createAndStartCache(filePath string, logger *slog.Logger) (cachev3.Cache, e
 			if err != nil {
 				return err
 			}
+			logger.Info("Updating cache", slog.String("version", response.VersionInfo))
 			return cache.SetSnapshot(context.Background(), catchAllHash, snapshot)
 		}
 		if err := updateCache(); err != nil {

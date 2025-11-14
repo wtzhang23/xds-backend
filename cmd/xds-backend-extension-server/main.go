@@ -81,6 +81,11 @@ func main() {
 				},
 				Flags: []cli.Flag{
 					&cli.StringFlag{
+						Name:  "log-level",
+						Usage: "the log level, should be one of Debug/Info/Warn/Error",
+						Value: slog.LevelInfo.String(),
+					},
+					&cli.StringFlag{
 						Name:  "host",
 						Usage: "the host on which to listen",
 						Value: "0.0.0.0",

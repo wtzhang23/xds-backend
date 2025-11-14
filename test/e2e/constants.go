@@ -88,10 +88,16 @@ const (
 	GatewayClassName = "eg"
 	// HTTPRouteName is the name of the HTTPRoute resource
 	HTTPRouteName = "test-route"
+	// FileEdsHTTPRouteName is the name of the HTTPRoute resource for fileeds test
+	FileEdsHTTPRouteName = "test-route-fileeds"
 	// XdsBackendResourceName is the name of the XdsBackend resource
 	XdsBackendResourceName = "test-backend"
+	// FileEdsXdsBackendResourceName is the name of the XdsBackend resource for fileeds test
+	FileEdsXdsBackendResourceName = "test-backend-fileeds"
 	// ExpectedClusterName is the expected Envoy cluster name for the HTTPRoute
 	ExpectedClusterName = "httproute/test-namespace/test-route/rule/0"
+	// FileEdsExpectedClusterName is the expected Envoy cluster name for the fileeds HTTPRoute
+	FileEdsExpectedClusterName = "httproute/test-namespace/test-route-fileeds/rule/0"
 
 	// GatewayListenerName is the name of the Gateway listener
 	GatewayListenerName = "http"
@@ -128,4 +134,19 @@ const (
 	EdsConfigPath = "/etc/envoy/eds/eds-config.yaml"
 	// EnvoyProxyPodPort is the port that Envoy proxy listens on in the pod
 	EnvoyProxyPodPort = 10080
+
+	// FileEdsDeploymentName is the name of the fileeds deployment
+	FileEdsDeploymentName = "fileeds"
+	// FileEdsServiceName is the name of the fileeds service
+	FileEdsServiceName = "fileeds"
+	// FileEdsConfigMapName is the name of the ConfigMap containing EDS configuration for fileeds
+	FileEdsConfigMapName = "fileeds-eds-config"
+	// FileEdsPort is the gRPC port for the fileeds server
+	FileEdsPort = 5006
+	// FileEdsConfigPath is the path to the EDS config file in the fileeds pod
+	FileEdsConfigPath = "/etc/envoy/eds/eds-config.yaml"
+	// FileEdsConfigDir is the directory where the EDS config file is mounted
+	FileEdsConfigDir = "/etc/envoy/eds"
+	// FileEdsClusterName is the name of the static cluster for fileeds in Envoy bootstrap
+	FileEdsClusterName = "fileeds-server"
 )
