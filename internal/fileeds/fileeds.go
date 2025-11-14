@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -21,6 +22,7 @@ import (
 	xdsv3 "github.com/envoyproxy/go-control-plane/pkg/server/v3"
 	"github.com/fsnotify/fsnotify"
 	"github.com/wtzhang23/xds-backend/internal/interceptors"
+	"github.com/wtzhang23/xds-backend/internal/tlsconfig"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -32,38 +34,83 @@ import (
 const catchAllHash = "catch-all-hash"
 
 var grpcServer *grpc.Server
+var grpcTLSServer *grpc.Server
 
-func StartEdsServer(host string, port int, filePath string, logger *slog.Logger) error {
-	address := net.JoinHostPort(host, strconv.Itoa(port))
-	logger.Info("Starting EDS server", slog.String("address", address), slog.String("file_path", filePath))
-	lis, err := net.Listen("tcp", address)
-	if err != nil {
-		return err
-	}
+func StartEdsServer(host string, port int, filePath string, logger *slog.Logger, tlsConfig *tlsconfig.Config, tlsPort int) error {
 	snapshotCache, err := createAndStartCache(filePath, logger)
 	if err != nil {
 		return err
 	}
-	server := xdsv3.NewServer(context.Background(), snapshotCache, nil)
-	grpcServer = grpc.NewServer(
-		grpc.ChainUnaryInterceptor(
-			interceptors.LoggingUnaryInterceptor(logger),
-		),
-		grpc.ChainStreamInterceptor(
-			interceptors.LoggingStreamInterceptor(logger),
-		),
-	)
-	endpointservice.RegisterEndpointDiscoveryServiceServer(grpcServer, server)
 
-	// Register reflection service for gRPC CLI tools
-	reflection.Register(grpcServer)
+	var wg sync.WaitGroup
+
+	// Create plain gRPC server
+	plainServer := createEdsGRPCServer(snapshotCache, logger, nil)
+	grpcServer = plainServer
+
+	// Start plain gRPC server
+	plainLis, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(port)))
+	if err != nil {
+		return err
+	}
+	logger.Info("Starting EDS server", slog.String("address", plainLis.Addr().String()))
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if err := plainServer.Serve(plainLis); err != nil {
+			logger.Error("Plain EDS server error", slog.String("error", err.Error()))
+		}
+	}()
+
+	// Create and start TLS gRPC server if configured
+	if tlsConfig != nil && tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
+		tlsServer := createEdsGRPCServer(snapshotCache, logger, tlsConfig)
+		grpcTLSServer = tlsServer
+
+		tlsLis, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(tlsPort)))
+		if err != nil {
+			return err
+		}
+		logger.Info("Starting TLS EDS server", slog.String("address", tlsLis.Addr().String()))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := tlsServer.Serve(tlsLis); err != nil {
+				logger.Error("TLS EDS server error", slog.String("error", err.Error()))
+			}
+		}()
+	}
+
+	// Wait for all servers to finish (they run indefinitely until stopped)
+	wg.Wait()
+	return nil
+}
+
+func createEdsGRPCServer(snapshotCache cachev3.Cache, logger *slog.Logger, tlsConfig *tlsconfig.Config) *grpc.Server {
+	server := xdsv3.NewServer(context.Background(), snapshotCache, nil)
+	var opts []grpc.ServerOption
+	opts = append(opts, grpc.ChainUnaryInterceptor(
+		interceptors.LoggingUnaryInterceptor(logger),
+	))
+	opts = append(opts, grpc.ChainStreamInterceptor(
+		interceptors.LoggingStreamInterceptor(logger),
+	))
+
+	// Add TLS credentials if configured
+	opts = tlsconfig.AddTLSCredentials(opts, tlsConfig, logger)
+
+	grpcServer := grpc.NewServer(opts...)
+	endpointservice.RegisterEndpointDiscoveryServiceServer(grpcServer, server)
 
 	// Register health check service
 	healthServer := health.NewServer()
 	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
 	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
 
-	return grpcServer.Serve(lis)
+	// Register reflection service for gRPC CLI tools (last, so it can discover all services)
+	reflection.Register(grpcServer)
+
+	return grpcServer
 }
 
 func createAndStartCache(filePath string, logger *slog.Logger) (cachev3.Cache, error) {
@@ -144,8 +191,11 @@ func HandleSignals() error {
 		for range c {
 			if grpcServer != nil {
 				grpcServer.Stop()
-				os.Exit(0)
 			}
+			if grpcTLSServer != nil {
+				grpcTLSServer.Stop()
+			}
+			os.Exit(0)
 		}
 	}()
 	return nil

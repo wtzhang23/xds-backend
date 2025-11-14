@@ -47,16 +47,41 @@ spec:
             - {{ .Values.logLevel }}
             - --metrics-port
             - {{ .Values.service.metricsPort | quote }}
+            {{- if and .Values.service.enablePlaintext (gt (int .Values.service.grpcPort) 0) }}
+            - --grpc-port
+            - {{ .Values.service.grpcPort | quote }}
+            {{- end }}
+            {{- if .Values.service.tls.enabled }}
+            - --tls-cert-file
+            - {{ .Values.service.tls.certPath }}
+            - --tls-key-file
+            - {{ .Values.service.tls.keyPath }}
+            - --tls-port
+            - {{ .Values.service.tls.grpcPort | quote }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.service.httpPort }}
               protocol: TCP
+            {{- if .Values.service.enablePlaintext }}
             - name: grpc
               containerPort: {{ .Values.service.grpcPort }}
               protocol: TCP
+            {{- end }}
+            {{- if .Values.service.tls.enabled }}
+            - name: grpc-tls
+              containerPort: {{ .Values.service.tls.grpcPort }}
+              protocol: TCP
+            {{- end }}
             - name: metrics
               containerPort: {{ .Values.service.metricsPort }}
               protocol: TCP
+          {{- if .Values.service.tls.enabled }}
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /etc/tls
+              readOnly: true
+          {{- end }}
           {{- with .Values.livenessProbe }}
           livenessProbe:
             {{- toYaml . | nindent 12 }}
@@ -80,4 +105,14 @@ spec:
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.service.tls.enabled }}
+      volumes:
+        - name: tls-certs
+          secret:
+            {{- if .Values.service.tls.secretName }}
+            secretName: {{ .Values.service.tls.secretName }}
+            {{- else }}
+            secretName: {{ printf "%s-tls" (include "xds-backend.fullname" .) }}
+            {{- end }}
       {{- end }}

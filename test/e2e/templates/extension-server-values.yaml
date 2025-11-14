@@ -3,4 +3,12 @@ image:
   tag: {{ .ExtensionServerImageTag }}
   pullPolicy: {{ .ImagePullPolicy }}
 logLevel: debug
+service:
+  enablePlaintext: {{ if .ExtensionServerEnablePlaintext }}true{{ else }}false{{ end }}
+  {{- if .ExtensionServerTLSEnabled }}
+  tls:
+    enabled: true
+    grpcPort: {{ .ExtensionServerTLSPort }}
+    secretName: {{ .ExtensionServerTLSSecretName }}
+  {{- end }}
 

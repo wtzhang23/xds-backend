@@ -40,6 +40,8 @@ const (
 	MetricsCollectionDelay = 2 * time.Second
 	// EnvoyAdminAPIReadyDelay is the delay to allow Envoy admin API to be ready after port forwarding
 	EnvoyAdminAPIReadyDelay = 2 * time.Second
+	// HTTPRequestTimeout is the timeout for retrying HTTP requests until success
+	HTTPRequestTimeout = 30 * time.Second
 
 	// ExtensionServerImageRepo is the Docker image repository for the extension server
 	ExtensionServerImageRepo = "wtzhang23/xds-backend-extension-server"
@@ -127,6 +129,8 @@ const (
 
 	// ExtensionServerPort is the gRPC port for the extension server
 	ExtensionServerPort = 5005
+	// ExtensionServerTLSPort is the TLS gRPC port for the extension server
+	ExtensionServerTLSPort = 5006
 	// ExtensionServerMetricsPort is the metrics port for the extension server
 	ExtensionServerMetricsPort = 8081
 

@@ -72,6 +72,21 @@ service:
   grpcPort: 5005
   httpPort: 8080
   metricsPort: 8081
+  # Enable plaintext gRPC endpoint (default: true)
+  enablePlaintext: true
+  # TLS configuration for gRPC endpoint
+  tls:
+    # Enable TLS gRPC endpoint
+    enabled: false
+    # TLS gRPC port
+    grpcPort: 5006
+    # Secret name containing TLS certificate and key
+    # The secret should have keys: tls.crt and tls.key
+    secretName: ""
+    # Path to certificate file in the container (default: /etc/tls/tls.crt)
+    certPath: "/etc/tls/tls.crt"
+    # Path to key file in the container (default: /etc/tls/tls.key)
+    keyPath: "/etc/tls/tls.key"
 
 # Metrics configuration
 metrics:
