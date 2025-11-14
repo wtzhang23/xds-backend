@@ -35,7 +35,7 @@ func AddTLSCredentials(opts []grpc.ServerOption, tlsConfig *Config, logger *slog
 		Certificates: []tls.Certificate{cert},
 	}
 	opts = append(opts, grpc.Creds(credentials.NewTLS(tlsServerConfig)))
-	logger.Info("TLS enabled", slog.String("cert-file", tlsConfig.CertFile), slog.String("key-file", tlsConfig.KeyFile))
+	logger.Debug("TLS enabled", slog.String("cert-file", tlsConfig.CertFile), slog.String("key-file", tlsConfig.KeyFile))
 
 	return opts
 }
