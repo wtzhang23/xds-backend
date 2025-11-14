@@ -11,7 +11,7 @@ spec:
   - matches:
     - path:
         type: PathPrefix
-        value: /
+        value: {{ .HTTPRoutePathPrefix }}
     backendRefs:
     - group: {{ .XdsBackendGroup }}
       kind: {{ .XdsBackendKind }}

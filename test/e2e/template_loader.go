@@ -11,6 +11,7 @@ import (
 	"text/template"
 	"time"
 
+	. "github.com/onsi/ginkgo/v2"
 	"gopkg.in/yaml.v2"
 	k8syaml "sigs.k8s.io/yaml"
 )
@@ -30,6 +31,7 @@ type TemplateData struct {
 	GatewayClassName               string
 	GatewayName                    string
 	HTTPRouteName                  string
+	HTTPRoutePathPrefix            string
 	GatewayListenerName            string
 	GatewayListenerPort            int
 	ExtensionServerFQDN            string
@@ -46,6 +48,15 @@ type TemplateData struct {
 	EdsConfigPath                  string // Path to EDS config file in Envoy pod
 	EdsConfigMapName               string // Name of ConfigMap containing EDS config
 	ClusterName                    string // Name of the kind cluster
+	FileEdsDeploymentName          string // Name of the fileeds deployment
+	FileEdsServiceName             string // Name of the fileeds service
+	FileEdsServiceFQDN             string // FQDN of the fileeds service
+	FileEdsConfigMapName           string // Name of ConfigMap containing EDS config for fileeds
+	FileEdsPort                    int    // Port for the fileeds server
+	FileEdsConfigPath              string // Path to EDS config file in fileeds pod
+	FileEdsConfigDir               string // Directory where EDS config is mounted in fileeds pod
+	FileEdsClusterName             string // Name of the static cluster for fileeds in Envoy bootstrap
+	ReferenceGrantName             string // Name of the ReferenceGrant resource
 }
 
 // indent adds indentation to each line of a string
@@ -136,7 +147,17 @@ func writeRenderedConfig(templatePath, content string) error {
 	// Get the directory of the current file (template_loader.go)
 	_, callerFile, _, _ := runtime.Caller(0)
 	baseDir := filepath.Dir(callerFile)
-	renderedDir := filepath.Join(baseDir, ".rendered-configs")
+
+	// Get current test name from Ginkgo
+	testName := "setup"
+	spec := CurrentSpecReport()
+	if spec.FullText() != "" {
+		// Sanitize test name for filesystem
+		testName = sanitizeTestName(spec.FullText())
+	}
+
+	// Create subdirectory for this test
+	renderedDir := filepath.Join(baseDir, ".rendered-configs", testName)
 	if err := os.MkdirAll(renderedDir, 0755); err != nil {
 		return fmt.Errorf("failed to create rendered configs directory: %w", err)
 	}
@@ -156,7 +177,17 @@ func writeRenderedHelmValues(templatePath string, values map[string]interface{})
 	// Get the directory of the current file (template_loader.go)
 	_, callerFile, _, _ := runtime.Caller(0)
 	baseDir := filepath.Dir(callerFile)
-	renderedDir := filepath.Join(baseDir, ".rendered-configs")
+
+	// Get current test name from Ginkgo
+	testName := "setup"
+	spec := CurrentSpecReport()
+	if spec.FullText() != "" {
+		// Sanitize test name for filesystem
+		testName = sanitizeTestName(spec.FullText())
+	}
+
+	// Create subdirectory for this test
+	renderedDir := filepath.Join(baseDir, ".rendered-configs", testName)
 	if err := os.MkdirAll(renderedDir, 0755); err != nil {
 		return fmt.Errorf("failed to create rendered configs directory: %w", err)
 	}
@@ -175,6 +206,32 @@ func writeRenderedHelmValues(templatePath string, values map[string]interface{})
 	}
 
 	return os.WriteFile(outputPath, yamlBytes, 0644)
+}
+
+// sanitizeTestName converts a test name to a filesystem-safe name
+func sanitizeTestName(testName string) string {
+	// Replace spaces and special characters with hyphens
+	sanitized := strings.ReplaceAll(testName, " ", "-")
+	sanitized = strings.ReplaceAll(sanitized, "/", "-")
+	sanitized = strings.ReplaceAll(sanitized, "\\", "-")
+	sanitized = strings.ReplaceAll(sanitized, ":", "-")
+	sanitized = strings.ReplaceAll(sanitized, "*", "-")
+	sanitized = strings.ReplaceAll(sanitized, "?", "-")
+	sanitized = strings.ReplaceAll(sanitized, "\"", "-")
+	sanitized = strings.ReplaceAll(sanitized, "<", "-")
+	sanitized = strings.ReplaceAll(sanitized, ">", "-")
+	sanitized = strings.ReplaceAll(sanitized, "|", "-")
+	// Remove multiple consecutive hyphens
+	for strings.Contains(sanitized, "--") {
+		sanitized = strings.ReplaceAll(sanitized, "--", "-")
+	}
+	// Remove leading/trailing hyphens
+	sanitized = strings.Trim(sanitized, "-")
+	// Limit length to avoid filesystem issues
+	if len(sanitized) > 200 {
+		sanitized = sanitized[:200]
+	}
+	return sanitized
 }
 
 // GetTemplatePath returns the template filename for use with LoadTemplate

@@ -1,0 +1,11 @@
+apiVersion: {{ .XdsBackendGroup }}/{{ .XdsBackendAPIVersion }}
+kind: {{ .XdsBackendKind }}
+metadata:
+  name: {{ .XdsBackendResourceName }}
+  namespace: {{ .EnvoyGatewayNamespace }}
+spec:
+  server:
+    server: {{ .FileEdsClusterName }}
+  service: {{ .TestServiceName }}
+  apiType: GRPC
+

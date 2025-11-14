@@ -30,6 +30,16 @@ const (
 	ClusterReadyTimeout = 5 * time.Minute
 	// HTTPClientTimeout is the timeout for HTTP client requests
 	HTTPClientTimeout = 10 * time.Second
+	// EnvoyProxyProcessingDelay is the delay to allow EnvoyProxy controller to process changes
+	EnvoyProxyProcessingDelay = 3 * time.Second
+	// EnvoyEndpointProcessingDelay is the delay to allow Envoy to process endpoints after cluster configuration
+	EnvoyEndpointProcessingDelay = 2 * time.Second
+	// EnvoyAccessLogFlushDelay is the delay to allow Envoy to flush access logs before collection
+	EnvoyAccessLogFlushDelay = 3 * time.Second
+	// MetricsCollectionDelay is the delay to allow metrics to be collected
+	MetricsCollectionDelay = 2 * time.Second
+	// EnvoyAdminAPIReadyDelay is the delay to allow Envoy admin API to be ready after port forwarding
+	EnvoyAdminAPIReadyDelay = 2 * time.Second
 
 	// ExtensionServerImageRepo is the Docker image repository for the extension server
 	ExtensionServerImageRepo = "wtzhang23/xds-backend-extension-server"
@@ -86,12 +96,22 @@ const (
 	GatewayName = "eg"
 	// GatewayClassName is the name of the GatewayClass resource
 	GatewayClassName = "eg"
-	// HTTPRouteName is the name of the HTTPRoute resource
-	HTTPRouteName = "test-route"
-	// XdsBackendResourceName is the name of the XdsBackend resource
-	XdsBackendResourceName = "test-backend"
+	// HTTPRouteName is the name of the HTTPRoute resource for file-based EDS test
+	HTTPRouteName = "test-route-file"
+	// FileEdsHTTPRouteName is the name of the HTTPRoute resource for fileeds test
+	FileEdsHTTPRouteName = "test-route-eds"
+	// XdsBackendResourceName is the name of the XdsBackend resource for file-based EDS test
+	XdsBackendResourceName = "test-backend-file"
+	// FileEdsXdsBackendResourceName is the name of the XdsBackend resource for fileeds test
+	FileEdsXdsBackendResourceName = "test-backend-eds"
 	// ExpectedClusterName is the expected Envoy cluster name for the HTTPRoute
-	ExpectedClusterName = "httproute/test-namespace/test-route/rule/0"
+	ExpectedClusterName = "httproute/test-namespace/test-route-file/rule/0"
+	// FileEdsExpectedClusterName is the expected Envoy cluster name for the fileeds HTTPRoute
+	FileEdsExpectedClusterName = "httproute/test-namespace/test-route-eds/rule/0"
+	// HTTPRoutePathPrefixFile is the path prefix for the file-based EDS HTTPRoute
+	HTTPRoutePathPrefixFile = "/file"
+	// HTTPRoutePathPrefixEds is the path prefix for the fileeds HTTPRoute
+	HTTPRoutePathPrefixEds = "/eds"
 
 	// GatewayListenerName is the name of the Gateway listener
 	GatewayListenerName = "http"
@@ -128,4 +148,19 @@ const (
 	EdsConfigPath = "/etc/envoy/eds/eds-config.yaml"
 	// EnvoyProxyPodPort is the port that Envoy proxy listens on in the pod
 	EnvoyProxyPodPort = 10080
+
+	// FileEdsDeploymentName is the name of the fileeds deployment
+	FileEdsDeploymentName = "fileeds"
+	// FileEdsServiceName is the name of the fileeds service
+	FileEdsServiceName = "fileeds"
+	// FileEdsConfigMapName is the name of the ConfigMap containing EDS configuration for fileeds
+	FileEdsConfigMapName = "fileeds-eds-config"
+	// FileEdsPort is the gRPC port for the fileeds server
+	FileEdsPort = 5006
+	// FileEdsConfigPath is the path to the EDS config file in the fileeds pod
+	FileEdsConfigPath = "/etc/envoy/eds/eds-config.yaml"
+	// FileEdsConfigDir is the directory where the EDS config file is mounted
+	FileEdsConfigDir = "/etc/envoy/eds"
+	// FileEdsClusterName is the name of the static cluster for fileeds in Envoy bootstrap
+	FileEdsClusterName = "fileeds-server"
 )
