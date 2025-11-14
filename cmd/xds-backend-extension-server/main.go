@@ -7,6 +7,7 @@ import (
 	"github.com/urfave/cli"
 	"github.com/wtzhang23/xds-backend/internal/extserver"
 	"github.com/wtzhang23/xds-backend/internal/fileeds"
+	"github.com/wtzhang23/xds-backend/internal/tlsconfig"
 )
 
 func main() {
@@ -25,12 +26,21 @@ func main() {
 					if err := level.UnmarshalText([]byte(ctx.String("log-level"))); err != nil {
 						level = slog.LevelInfo
 					}
+					var tlsConfig *tlsconfig.Config
+					if ctx.String("tls-cert-file") != "" && ctx.String("tls-key-file") != "" {
+						tlsConfig = &tlsconfig.Config{
+							CertFile: ctx.String("tls-cert-file"),
+							KeyFile:  ctx.String("tls-key-file"),
+						}
+					}
 					return extserver.StartExtensionServer(
 						ctx.String("host"),
 						ctx.Int("grpc-port"),
 						ctx.Int("http-port"),
 						ctx.Int("metrics-port"),
 						level,
+						tlsConfig,
+						ctx.Int("tls-port"),
 					)
 				},
 				Flags: []cli.Flag{
@@ -59,6 +69,21 @@ func main() {
 						Usage: "the log level, should be one of Debug/Info/Warn/Error",
 						Value: slog.LevelInfo.String(),
 					},
+					&cli.StringFlag{
+						Name:  "tls-cert-file",
+						Usage: "path to TLS certificate file (enables TLS when provided with tls-key-file)",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "tls-key-file",
+						Usage: "path to TLS private key file (enables TLS when provided with tls-cert-file)",
+						Value: "",
+					},
+					&cli.IntFlag{
+						Name:  "tls-port",
+						Usage: "the port on which to listen for TLS gRPC requests",
+						Value: 5006,
+					},
 				},
 			},
 			{
@@ -72,11 +97,20 @@ func main() {
 					logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 						Level: level,
 					}))
+					var tlsConfig *tlsconfig.Config
+					if ctx.String("tls-cert-file") != "" && ctx.String("tls-key-file") != "" {
+						tlsConfig = &tlsconfig.Config{
+							CertFile: ctx.String("tls-cert-file"),
+							KeyFile:  ctx.String("tls-key-file"),
+						}
+					}
 					return fileeds.StartEdsServer(
 						ctx.String("host"),
 						ctx.Int("grpc-port"),
 						ctx.String("file-path"),
 						logger,
+						tlsConfig,
+						ctx.Int("tls-port"),
 					)
 				},
 				Flags: []cli.Flag{
@@ -104,6 +138,21 @@ func main() {
 						Name:  "file-path",
 						Usage: "the path to the file to watch for changes",
 						Value: "/etc/envoy/eds.yaml",
+					},
+					&cli.StringFlag{
+						Name:  "tls-cert-file",
+						Usage: "path to TLS certificate file (enables TLS when provided with tls-key-file)",
+						Value: "",
+					},
+					&cli.StringFlag{
+						Name:  "tls-key-file",
+						Usage: "path to TLS private key file (enables TLS when provided with tls-cert-file)",
+						Value: "",
+					},
+					&cli.IntFlag{
+						Name:  "tls-port",
+						Usage: "the port on which to listen for TLS gRPC requests",
+						Value: 5006,
 					},
 				},
 			},

@@ -8,10 +8,18 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
+    {{- if .Values.service.enablePlaintext }}
     - port: {{ .Values.service.grpcPort }}
       targetPort: grpc
       protocol: TCP
       name: grpc
+    {{- end }}
+    {{- if .Values.service.tls.enabled }}
+    - port: {{ .Values.service.tls.grpcPort }}
+      targetPort: grpc-tls
+      protocol: TCP
+      name: grpc-tls
+    {{- end }}
     - port: {{ .Values.service.httpPort }}
       targetPort: http
       protocol: TCP

@@ -39,6 +39,10 @@ type TemplateData struct {
 	ExtensionServerImageRepo       string
 	ExtensionServerImageTag        string
 	ImagePullPolicy                string
+	ExtensionServerEnablePlaintext bool
+	ExtensionServerTLSEnabled       bool
+	ExtensionServerTLSPort         int
+	ExtensionServerTLSSecretName   string
 	EnvoyGatewayContainerPort      int
 	EnvoyGatewayHTTPSContainerPort int
 	EnvoyGatewayHostPort           int

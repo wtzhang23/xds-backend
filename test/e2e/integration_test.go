@@ -13,6 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	grpc_health_v1 "google.golang.org/grpc/health/grpc_health_v1"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -200,15 +203,31 @@ var _ = Describe("xDS Backend Integration", func() {
 		case <-readyChan:
 		}
 
-		client := &http.Client{Timeout: HTTPClientTimeout}
-		req, err := http.NewRequest("GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, HTTPRoutePathPrefixFile), nil)
-		Expect(err).NotTo(HaveOccurred())
-		req.Header.Set("Host", "*")
+		// Send HTTP request with retry to handle transient 503 errors
+		var resp *http.Response
+		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
+			client := &http.Client{Timeout: HTTPClientTimeout}
+			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, HTTPRoutePathPrefixFile), nil)
+			if err != nil {
+				return false, err
+			}
+			req.Header.Set("Host", "*")
 
-		resp, err := client.Do(req)
-		Expect(err).NotTo(HaveOccurred())
+			attemptResp, err := client.Do(req)
+			if err != nil {
+				return false, nil // Retry on network error
+			}
+
+			// Success if we get 200 OK
+			if attemptResp.StatusCode == http.StatusOK {
+				resp = attemptResp
+				return true, nil
+			}
+			// Close body and retry on 503 or other non-OK status codes
+			attemptResp.Body.Close()
+			return false, nil
+		})).To(Succeed())
 		defer resp.Body.Close()
-
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
 
 		// Give Envoy time to flush access logs before AfterEach collects them
@@ -489,21 +508,121 @@ var _ = Describe("xDS Backend Integration", func() {
 		case <-readyChan:
 		}
 
-		client := &http.Client{Timeout: HTTPClientTimeout}
-		req, err := http.NewRequest("GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, HTTPRoutePathPrefixEds), nil)
-		Expect(err).NotTo(HaveOccurred())
-		req.Header.Set("Host", "*")
+		// Send HTTP request with retry to handle transient 503 errors
+		var resp *http.Response
+		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
+			client := &http.Client{Timeout: HTTPClientTimeout}
+			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, HTTPRoutePathPrefixEds), nil)
+			if err != nil {
+				return false, err
+			}
+			req.Header.Set("Host", "*")
 
-		resp, err := client.Do(req)
-		Expect(err).NotTo(HaveOccurred())
+			attemptResp, err := client.Do(req)
+			if err != nil {
+				return false, nil // Retry on network error
+			}
+
+			// Success if we get 200 OK
+			if attemptResp.StatusCode == http.StatusOK {
+				resp = attemptResp
+				return true, nil
+			}
+			// Close body and retry on 503 or other non-OK status codes
+			attemptResp.Body.Close()
+			return false, nil
+		})).To(Succeed())
 		defer resp.Body.Close()
-
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
 
 		// Give Envoy time to flush access logs before AfterEach collects them
 		// Envoy access logs are buffered and may take a moment to be written to stdout
 		// We need enough time for the log to be flushed and available via kubectl logs
 		time.Sleep(EnvoyAccessLogFlushDelay)
+	})
+
+	It("should connect to extension server over TLS endpoint", func() {
+		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
+		Expect(err).NotTo(HaveOccurred())
+
+		// Create TLS secret
+		tlsSecretName := "xds-backend-tls"
+		extensionServerFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", ExtensionServerReleaseName, ExtensionServerNamespace)
+		Expect(CreateTLSSecret(ctx, k8sClient, ExtensionServerNamespace, tlsSecretName, extensionServerFQDN)).To(Succeed())
+
+		// Deploy extension server with TLS enabled and plaintext disabled
+		extensionServerDeployer, err := NewExtensionServerDeployer(cluster.GetKubeconfigPath())
+		Expect(err).NotTo(HaveOccurred())
+		extensionServerDeployer.SetCluster(cluster)
+		extensionServerDeployer.SetLogger(defaultLogger)
+
+		Expect(extensionServerDeployer.DeployWithTLS(ctx, ExtensionServerNamespace, false, true, ExtensionServerTLSPort, tlsSecretName)).To(Succeed())
+		Expect(extensionServerDeployer.WaitForReady(ctx, ExtensionServerNamespace)).To(Succeed())
+
+		// Get the TLS certificate from the secret
+		secret, err := k8sClient.GetClientset().CoreV1().Secrets(ExtensionServerNamespace).Get(ctx, tlsSecretName, metav1.GetOptions{})
+		Expect(err).NotTo(HaveOccurred())
+		certPEM := secret.Data["tls.crt"]
+		Expect(certPEM).NotTo(BeEmpty())
+
+		// Create TLS config for client
+		tlsConfig, err := CreateTLSConfig(certPEM)
+		Expect(err).NotTo(HaveOccurred())
+
+		// Get extension server pod for port forwarding
+		pods, err := k8sClient.GetClientset().CoreV1().Pods(ExtensionServerNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: ExtensionServerLabelSelector,
+		})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(pods.Items)).To(BeNumerically(">", 0))
+		podName := pods.Items[0].Name
+
+		// Setup port forward to TLS port
+		restConfig := k8sClient.GetConfig()
+		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", ExtensionServerNamespace, podName)
+		transport, upgrader, err := spdy.RoundTripperFor(restConfig)
+		Expect(err).NotTo(HaveOccurred())
+		baseURL, err := url.Parse(restConfig.Host)
+		Expect(err).NotTo(HaveOccurred())
+		baseURL.Path = path
+		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", baseURL)
+
+		stopChan := make(chan struct{}, 1)
+		readyChan := make(chan struct{}, 1)
+		errChan := make(chan error, 1)
+		localPort := 5007 // Local port for forwarding
+		portMapping := fmt.Sprintf("%d:%d", localPort, ExtensionServerTLSPort)
+		fw, err := portforward.New(dialer, []string{portMapping}, stopChan, readyChan, nil, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		go func() {
+			if err := fw.ForwardPorts(); err != nil {
+				errChan <- err
+			}
+		}()
+		defer close(stopChan)
+
+		select {
+		case <-ctx.Done():
+			Fail(fmt.Sprintf("context cancelled: %v", ctx.Err()))
+		case err := <-errChan:
+			Fail(fmt.Sprintf("port forward error: %v", err))
+		case <-readyChan:
+		}
+
+		// Connect to gRPC server over TLS
+		conn, err := grpc.Dial(
+			fmt.Sprintf("localhost:%d", localPort),
+			grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
+		)
+		Expect(err).NotTo(HaveOccurred())
+		defer conn.Close()
+
+		// Make a simple health check query to verify TLS connection works
+		healthClient := grpc_health_v1.NewHealthClient(conn)
+		healthResp, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(healthResp.Status).To(Equal(grpc_health_v1.HealthCheckResponse_SERVING))
 	})
 })
 
