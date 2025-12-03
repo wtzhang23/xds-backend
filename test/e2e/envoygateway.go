@@ -17,6 +17,29 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// parseImage parses a Docker image string into repository and tag
+// Examples:
+//   - "envoyproxy/gateway:v1.6.0" -> ("envoyproxy/gateway", "v1.6.0")
+//   - "envoyproxy/gateway:latest" -> ("envoyproxy/gateway", "latest")
+//   - "envoyproxy/gateway" -> ("envoyproxy/gateway", "latest")
+//   - "" -> ("", "")
+func parseImage(image string) (repository, tag string) {
+	if image == "" {
+		return "", ""
+	}
+
+	parts := strings.Split(image, ":")
+	if len(parts) == 1 {
+		return parts[0], "latest"
+	}
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	// Handle case with multiple colons (e.g., registry:5000/repo:tag)
+	lastColon := strings.LastIndex(image, ":")
+	return image[:lastColon], image[lastColon+1:]
+}
+
 // EnvoyGatewayInstaller handles installation of Envoy Gateway
 type EnvoyGatewayInstaller struct {
 	k8sClient *K8sClient
@@ -59,7 +82,8 @@ func (e *EnvoyGatewayInstaller) SetLogger(logger testLogger) {
 
 // Install installs Envoy Gateway using Helm
 // extensionServerFQDN is the FQDN of the extension server (e.g., "xds-backend.xds-backend-system.svc.cluster.local:5005")
-func (e *EnvoyGatewayInstaller) Install(ctx context.Context, extensionServerFQDN string, extensionServerPort int) error {
+// envoyGatewayImage is the Docker image for Envoy Gateway (e.g., "envoyproxy/gateway:v1.6.0" or empty for default)
+func (e *EnvoyGatewayInstaller) Install(ctx context.Context, extensionServerFQDN string, extensionServerPort int, envoyGatewayImage string) error {
 	e.logger.Log("[EnvoyGateway] Starting installation...")
 	// Create namespace if it doesn't exist
 	if err := e.k8sClient.CreateNamespace(ctx, EnvoyGatewayNamespace); err != nil {
@@ -152,28 +176,33 @@ func (e *EnvoyGatewayInstaller) Install(ctx context.Context, extensionServerFQDN
 		return fmt.Errorf("failed to load chart from %s: %w", chartPath, err)
 	}
 
-	return e.installChart(ctx, actionConfig, chart, chartPath, extensionServerFQDN, extensionServerPort)
+	return e.installChart(ctx, actionConfig, chart, extensionServerFQDN, extensionServerPort, envoyGatewayImage)
 }
 
 // installChart performs the actual installation
-func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *action.Configuration, chart *chart.Chart, chartPath string, extensionServerFQDN string, extensionServerPort int) error {
+func (e *EnvoyGatewayInstaller) installChart(ctx context.Context, actionConfig *action.Configuration, chart *chart.Chart, extensionServerFQDN string, extensionServerPort int, envoyGatewayImage string) error {
+	// Parse image if provided
+	imageRepo, imageTag := parseImage(envoyGatewayImage)
+	if envoyGatewayImage != "" {
+		e.logger.Logf("[EnvoyGateway] Using custom image: %s (repository: %s, tag: %s)", envoyGatewayImage, imageRepo, imageTag)
+	}
+
 	// Load Helm values from template
-	valuesTemplateData := TemplateData{
+	valuesTemplateData := EnvoyGatewayValuesTemplate{
 		XdsBackendGroup:                XdsBackendGroup,
 		XdsBackendAPIVersion:           XdsBackendAPIVersion,
 		ExtensionServerFQDN:            extensionServerFQDN,
 		ExtensionServerPort:            extensionServerPort,
 		EnvoyGatewayContainerPort:      EnvoyGatewayContainerPort,
 		EnvoyGatewayHTTPSContainerPort: EnvoyGatewayHTTPSContainerPort,
+		EnvoyGatewayImageRepository:    imageRepo,
+		EnvoyGatewayImageTag:           imageTag,
 	}
-	valuesTemplatePath := GetTemplatePath("envoy-gateway-values.yaml")
+	valuesTemplatePath := "envoy-gateway-values.yaml"
 	values, err := LoadHelmValues(valuesTemplatePath, valuesTemplateData)
 	if err != nil {
 		return fmt.Errorf("failed to load Helm values template: %w", err)
 	}
-
-	// Debug: Log the rendered Helm values
-	e.logger.Logf("[EnvoyGateway] Helm values configured for Envoy Gateway installation")
 
 	// Check if already installed
 	histAction := action.NewHistory(actionConfig)
@@ -231,11 +260,8 @@ func (e *EnvoyGatewayInstaller) WaitForReady(ctx context.Context, namespace stri
 
 	e.logger.Logf("[EnvoyGateway] Waiting for pods to be ready...")
 
-	// Directly use WaitForPodsReady which already uses wait.PollUntilContextTimeout
-	// This is the idiomatic Kubernetes way - no need to nest polling
 	err := e.k8sClient.WaitForPodsReady(timeoutCtx, namespace, EnvoyGatewayLabelSelector, TestTimeout)
 	if err != nil {
-		// Extract final pod status for debugging
 		e.printPodStatus(ctx, namespace, EnvoyGatewayLabelSelector)
 		return fmt.Errorf("envoy gateway failed to become ready: %w", err)
 	}
@@ -244,7 +270,6 @@ func (e *EnvoyGatewayInstaller) WaitForReady(ctx context.Context, namespace stri
 	return nil
 }
 
-// printPodStatus prints the status of pods for debugging
 func (e *EnvoyGatewayInstaller) printPodStatus(ctx context.Context, namespace, labelSelector string) {
 	pods, err := e.k8sClient.GetClientset().CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: labelSelector,

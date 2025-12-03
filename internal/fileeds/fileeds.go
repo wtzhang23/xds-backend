@@ -150,7 +150,7 @@ func createAndStartCache(filePath string, logger *slog.Logger) (cachev3.Cache, e
 					logger.Error("Error unmarshalling EDS resource", slog.String("error", err.Error()))
 					continue
 				}
-				edsResources[resourcev3.EndpointType] = []types.Resource{&eds}
+				edsResources[resourcev3.EndpointType] = append(edsResources[resourcev3.EndpointType], &eds)
 			}
 			snapshot, err := cachev3.NewSnapshot(response.VersionInfo, edsResources)
 			if err != nil {

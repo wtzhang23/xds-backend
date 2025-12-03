@@ -135,6 +135,12 @@ func (s *Server) PostClusterModify(ctx context.Context, req *pb.PostClusterModif
 
 func (s *Server) changeXdsOfCluster(ctx context.Context, cluster *clusterv3.Cluster, backendConfig types.XdsBackendConfig) {
 	s.log.DebugContext(ctx, "Configuring cluster to use EDS", slog.String("cluster", cluster.Name), slog.String("eds_service_name", backendConfig.EdsServiceName()))
+	hadTLS := cluster.TransportSocket != nil
+	if hadTLS {
+		s.log.DebugContext(ctx, "Cluster has TransportSocket before EDS configuration",
+			slog.String("cluster", cluster.Name))
+	}
+
 	cluster.ClusterDiscoveryType = &clusterv3.Cluster_Type{
 		Type: clusterv3.Cluster_EDS,
 	}

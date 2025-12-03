@@ -62,8 +62,10 @@ const (
 
 	// TestServiceName is the name of the test HTTP service
 	TestServiceName = "test-http-service"
-	// TestServicePort is the port for the test HTTP service
+	// TestServicePort is the port for the test HTTP service (plaintext)
 	TestServicePort = 8080
+	// TestServiceTLSPort is the port for the test HTTP service (TLS)
+	TestServiceTLSPort = 8443
 	// EnvoyGatewayHostPort is the host port for Envoy Gateway HTTP
 	EnvoyGatewayHostPort = 8080
 	// EnvoyGatewayContainerPort is the container port for Envoy Gateway HTTP
@@ -75,8 +77,8 @@ const (
 
 	// EnvoyGatewayChartPath is the OCI path for the Envoy Gateway Helm chart
 	EnvoyGatewayChartPath = "oci://docker.io/envoyproxy/gateway-helm"
-	// EnvoyGatewayChartVersion is the version of the Envoy Gateway chart (empty means latest)
-	EnvoyGatewayChartVersion = ""
+	// EnvoyGatewayChartVersion is the version of the Envoy Gateway chart
+	EnvoyGatewayChartVersion = "1.6.0"
 
 	// HelmChartDir is the directory for Helm charts
 	HelmChartDir = ".helm/charts"
@@ -107,9 +109,9 @@ const (
 	// FileEdsXdsBackendResourceName is the name of the XdsBackend resource for fileeds test
 	FileEdsXdsBackendResourceName = "test-backend-eds"
 	// ExpectedClusterName is the expected Envoy cluster name for the HTTPRoute
-	ExpectedClusterName = "httproute/test-namespace/test-route-file/rule/0"
+	ExpectedClusterName = "httproute/envoy-gateway-system/test-route-file/rule/0"
 	// FileEdsExpectedClusterName is the expected Envoy cluster name for the fileeds HTTPRoute
-	FileEdsExpectedClusterName = "httproute/test-namespace/test-route-eds/rule/0"
+	FileEdsExpectedClusterName = "httproute/envoy-gateway-system/test-route-eds/rule/0"
 	// HTTPRoutePathPrefixFile is the path prefix for the file-based EDS HTTPRoute
 	HTTPRoutePathPrefixFile = "/file"
 	// HTTPRoutePathPrefixEds is the path prefix for the fileeds HTTPRoute
@@ -167,4 +169,18 @@ const (
 	FileEdsConfigDir = "/etc/envoy/eds"
 	// FileEdsClusterName is the name of the static cluster for fileeds in Envoy bootstrap
 	FileEdsClusterName = "fileeds-server"
+
+	// BackendTLSPolicyTest constants
+	BackendTLSPolicyHTTPRouteName  = "test-route-backend-tls"
+	BackendTLSPolicyXdsBackendName = "test-backend-tls"
+	BackendTLSPolicyName           = "test-backend-tls-policy"
+	BackendTLSPolicyPathPrefix     = "/backend-tls"
+	GatewayTLSListenerName         = "https"
+	GatewayTLSListenerPort         = 443
+	GatewayTLSCertificateName      = "gateway-tls-cert"
+	BackendTLSCACertName           = "backend-tls-ca-cert"
+	BackendTLSHostname             = "test-http-service.test-namespace.svc.cluster.local"
+	TestServiceTLSSecretName       = "test-service-tls"
+	BackendTLSEdsConfigMapName     = "backend-tls-eds-config"
+	BackendTLSEdsConfigPath        = "/etc/envoy/eds/backend-tls-eds-config.yaml"
 )
