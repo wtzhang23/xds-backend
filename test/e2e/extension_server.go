@@ -106,7 +106,7 @@ func (e *ExtensionServerDeployer) DeployWithTLS(ctx context.Context, namespace s
 	}
 
 	// Load Helm values from template
-	valuesTemplateData := TemplateData{
+	valuesTemplateData := ExtensionServerValuesTemplate{
 		ExtensionServerImageRepo:       ExtensionServerImageRepo,
 		ExtensionServerImageTag:        ExtensionServerImageTag,
 		ImagePullPolicy:                 ImagePullPolicy,
@@ -115,7 +115,7 @@ func (e *ExtensionServerDeployer) DeployWithTLS(ctx context.Context, namespace s
 		ExtensionServerTLSPort:          tlsPort,
 		ExtensionServerTLSSecretName:    tlsSecretName,
 	}
-	valuesTemplatePath := GetTemplatePath("extension-server-values.yaml")
+	valuesTemplatePath := "extension-server-values.yaml"
 	values, err := LoadHelmValues(valuesTemplatePath, valuesTemplateData)
 	if err != nil {
 		return fmt.Errorf("failed to load Helm values template: %w", err)

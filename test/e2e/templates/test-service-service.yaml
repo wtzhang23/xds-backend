@@ -11,4 +11,10 @@ spec:
     targetPort: {{ .TestServicePort }}
     protocol: TCP
     name: http
+  {{ if .TestServiceTLSSecretName }}
+  - port: {{ .TestServiceTLSPort }}
+    targetPort: {{ .TestServiceTLSPort }}
+    protocol: TCP
+    name: https
+  {{ end }}
 

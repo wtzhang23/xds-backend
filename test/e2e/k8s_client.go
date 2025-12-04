@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 	gatewayclient "sigs.k8s.io/gateway-api/pkg/client/clientset/versioned"
+	k8syaml "sigs.k8s.io/yaml"
 )
 
 // K8sClient wraps Kubernetes client operations
@@ -161,10 +162,8 @@ func (k *K8sClient) GetServiceClusterIP(ctx context.Context, namespace, name str
 
 // ApplyYAML applies YAML resources using server-side apply
 func (k *K8sClient) ApplyYAML(ctx context.Context, yamlContent string) error {
-	decoder := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
-
-	// Split YAML by --- separator
-	manifests := strings.Split(yamlContent, "---")
+	yamlDocSeparator := regexp.MustCompile(`(?m)^---\s*$`)
+	manifests := yamlDocSeparator.Split(yamlContent, -1)
 
 	for _, manifest := range manifests {
 		manifest = strings.TrimSpace(manifest)
@@ -172,15 +171,20 @@ func (k *K8sClient) ApplyYAML(ctx context.Context, yamlContent string) error {
 			continue
 		}
 
-		// Decode YAML to unstructured object
-		obj := &unstructured.Unstructured{}
-		_, gvk, err := decoder.Decode([]byte(manifest), nil, obj)
-		if err != nil {
-			return fmt.Errorf("failed to decode YAML: %w", err)
+		manifestBytes := []byte(manifest)
+		if len(manifestBytes) > 0 && manifestBytes[len(manifestBytes)-1] != '\n' {
+			manifestBytes = append(manifestBytes, '\n')
 		}
 
-		// Get the appropriate client for the resource type
-		if err := k.applyUnstructured(ctx, obj, gvk); err != nil {
+		var objMap map[string]interface{}
+		if err := k8syaml.Unmarshal(manifestBytes, &objMap); err != nil {
+			return fmt.Errorf("failed to unmarshal YAML: %w", err)
+		}
+
+		obj := &unstructured.Unstructured{Object: objMap}
+		gvk := obj.GroupVersionKind()
+
+		if err := k.applyUnstructured(ctx, obj, &gvk); err != nil {
 			return fmt.Errorf("failed to apply resource %s/%s: %w", gvk.Kind, obj.GetName(), err)
 		}
 	}
@@ -199,7 +203,7 @@ func (k *K8sClient) applyUnstructured(ctx context.Context, obj *unstructured.Uns
 
 // Helper methods for unstructured resources using dynamic client
 func (k *K8sClient) getUnstructuredResource(ctx context.Context, obj *unstructured.Unstructured, gvk *schema.GroupVersionKind) (*unstructured.Unstructured, error) {
-	resourceClient, err := k.getResourceClient(ctx, gvk, obj.GetNamespace())
+	resourceClient, err := k.getResourceClient(gvk, obj.GetNamespace())
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +211,7 @@ func (k *K8sClient) getUnstructuredResource(ctx context.Context, obj *unstructur
 }
 
 func (k *K8sClient) createUnstructuredResource(ctx context.Context, obj *unstructured.Unstructured, gvk *schema.GroupVersionKind) error {
-	resourceClient, err := k.getResourceClient(ctx, gvk, obj.GetNamespace())
+	resourceClient, err := k.getResourceClient(gvk, obj.GetNamespace())
 	if err != nil {
 		return err
 	}
@@ -216,7 +220,7 @@ func (k *K8sClient) createUnstructuredResource(ctx context.Context, obj *unstruc
 }
 
 func (k *K8sClient) updateUnstructuredResource(ctx context.Context, obj *unstructured.Unstructured, gvk *schema.GroupVersionKind) error {
-	resourceClient, err := k.getResourceClient(ctx, gvk, obj.GetNamespace())
+	resourceClient, err := k.getResourceClient(gvk, obj.GetNamespace())
 	if err != nil {
 		return err
 	}
@@ -229,7 +233,7 @@ func (k *K8sClient) updateUnstructuredResource(ctx context.Context, obj *unstruc
 
 // getResourceClient returns the appropriate resource client (namespaced or cluster-scoped)
 // Uses RESTMapper to automatically determine GVR and scope
-func (k *K8sClient) getResourceClient(ctx context.Context, gvk *schema.GroupVersionKind, namespace string) (dynamic.ResourceInterface, error) {
+func (k *K8sClient) getResourceClient(gvk *schema.GroupVersionKind, namespace string) (dynamic.ResourceInterface, error) {
 	// Use RESTMapper to get GVR from GVK (handles pluralization automatically)
 	mapping, err := k.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 	if err != nil {
@@ -380,4 +384,9 @@ func (k *K8sClient) GetClientset() *kubernetes.Clientset {
 // GetDynamicClient returns the dynamic client
 func (k *K8sClient) GetDynamicClient() dynamic.Interface {
 	return k.dynamic
+}
+
+// DeleteSecret deletes a Secret resource
+func (k *K8sClient) DeleteSecret(ctx context.Context, namespace, name string) error {
+	return k.clientset.CoreV1().Secrets(namespace).Delete(ctx, name, metav1.DeleteOptions{})
 }

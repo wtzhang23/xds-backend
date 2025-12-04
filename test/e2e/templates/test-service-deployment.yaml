@@ -14,14 +14,61 @@ spec:
         app: {{ .TestServiceName }}
     spec:
       containers:
-      - name: http-echo
-        image: hashicorp/http-echo:latest
-        args:
-        - -text
-        - Hello from test service
-        - -listen
-        - :{{ .TestServicePort }}
+      - name: nginx
+        image: nginx:alpine
         ports:
         - containerPort: {{ .TestServicePort }}
           name: http
-
+        {{ if .TestServiceTLSSecretName }}
+        - containerPort: {{ .TestServiceTLSPort }}
+          name: https
+        {{ end }}
+        volumeMounts:
+        {{ if .TestServiceTLSSecretName }}
+        - name: tls-certs
+          mountPath: /etc/nginx/tls
+          readOnly: true
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+          readOnly: true
+        {{ end }}
+      volumes:
+      {{ if .TestServiceTLSSecretName }}
+      - name: tls-certs
+        secret:
+          secretName: {{ .TestServiceTLSSecretName }}
+      - name: nginx-config
+        configMap:
+          name: {{ .TestServiceName }}-nginx-config
+      {{ end }}
+---
+{{ if .TestServiceTLSSecretName }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .TestServiceName }}-nginx-config
+  namespace: {{ .TestNamespace }}
+data:
+  default.conf: |
+    # Plaintext HTTP listener
+    server {
+        listen {{ .TestServicePort }};
+        
+        location / {
+            return 200 "Hello from test service\n";
+            add_header Content-Type text/plain;
+        }
+    }
+    
+    # TLS HTTPS listener
+    server {
+        listen {{ .TestServiceTLSPort }} ssl;
+        ssl_certificate /etc/nginx/tls/tls.crt;
+        ssl_certificate_key /etc/nginx/tls/tls.key;
+        
+        location / {
+            return 200 "Hello from test service\n";
+            add_header Content-Type text/plain;
+        }
+    }
+{{ end }}

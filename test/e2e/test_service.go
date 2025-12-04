@@ -23,20 +23,27 @@ func NewTestServiceDeployer(kubeconfig string) (*TestServiceDeployer, error) {
 	}, nil
 }
 
-// Deploy deploys a test HTTP service
+// Deploy deploys a test HTTP service with optional TLS support
 func (d *TestServiceDeployer) Deploy(ctx context.Context, namespace, name string, port int) error {
+	return d.DeployWithTLS(ctx, namespace, name, port, "", 0)
+}
+
+// DeployWithTLS deploys a test HTTP service with TLS support
+func (d *TestServiceDeployer) DeployWithTLS(ctx context.Context, namespace, name string, port int, tlsSecretName string, tlsPort int) error {
 	// Create namespace if needed
 	if err := d.k8sClient.CreateNamespace(ctx, namespace); err != nil {
 		return fmt.Errorf("failed to create namespace: %w", err)
 	}
 
 	// Load deployment template
-	templateData := TemplateData{
-		TestServiceName: name,
-		TestNamespace:   namespace,
-		TestServicePort: port,
+	templateData := TestServiceDeploymentTemplate{
+		TestServiceName:       name,
+		TestNamespace:         namespace,
+		TestServicePort:       port,
+		TestServiceTLSSecretName: tlsSecretName,
+		TestServiceTLSPort:     tlsPort,
 	}
-	deploymentTemplatePath := GetTemplatePath("test-service-deployment.yaml")
+	deploymentTemplatePath := "test-service-deployment.yaml"
 	deploymentYaml, err := LoadTemplate(deploymentTemplatePath, templateData)
 	if err != nil {
 		return fmt.Errorf("failed to load deployment template: %w", err)
@@ -48,7 +55,7 @@ func (d *TestServiceDeployer) Deploy(ctx context.Context, namespace, name string
 	}
 
 	// Load service template
-	serviceTemplatePath := GetTemplatePath("test-service-service.yaml")
+	serviceTemplatePath := "test-service-service.yaml"
 	serviceYaml, err := LoadTemplate(serviceTemplatePath, templateData)
 	if err != nil {
 		return fmt.Errorf("failed to load service template: %w", err)

@@ -23,20 +23,4 @@ func (g ginkgoLogger) Log(args ...interface{}) {
 	fmt.Fprintln(GinkgoWriter, args...)
 }
 
-// testingTLogger wraps testing.T to implement testLogger
-type testingTLogger struct {
-	t interface {
-		Logf(format string, args ...interface{})
-		Log(args ...interface{})
-	}
-}
-
-func (t testingTLogger) Logf(format string, args ...interface{}) {
-	t.t.Logf(format, args...)
-}
-
-func (t testingTLogger) Log(args ...interface{}) {
-	t.t.Log(args...)
-}
-
 var defaultLogger testLogger = ginkgoLogger{}
