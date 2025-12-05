@@ -10,29 +10,29 @@ spec:
       envoyDeployment:
         container:
           volumeMounts:
-          - mountPath: /etc/envoy/eds
-            name: eds
+          - mountPath: /etc/envoy/xds
+            name: envoy-eds-config
             readOnly: true
         pod:
           volumes:
-          - name: eds
+          - name: envoy-eds-config
             configMap:
-              name: {{ .EdsConfigMapName }}
+              name: {{ .EnvoyEdsConfigMapName }}
   bootstrap:
     type: Merge
     value: |
       static_resources:
         clusters:
-        - name: {{ .FileEdsClusterName }}
+        - name: {{ .FileXdsClusterName }}
           type: STRICT_DNS
           connect_timeout: 5s
           load_assignment:
-            cluster_name: {{ .FileEdsClusterName }}
+            cluster_name: {{ .FileXdsClusterName }}
             endpoints:
             - lb_endpoints:
               - endpoint:
                   address:
                     socket_address:
-                      address: {{ .FileEdsServiceFQDN }}
-                      port_value: {{ .FileEdsPort }}
+                      address: {{ .FileXdsServiceFQDN }}
+                      port_value: {{ .FileXdsPort }}
           http2_protocol_options: {}

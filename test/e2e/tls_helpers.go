@@ -32,10 +32,10 @@ func GenerateSelfSignedCert(commonName string) ([]byte, []byte, error) {
 		Subject: pkix.Name{
 			CommonName: commonName,
 		},
-		NotBefore:    time.Now(),
-		NotAfter:     time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
-		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		// Add localhost to DNS names for port-forwarding in e2e tests
 		DNSNames: []string{commonName, "localhost", "127.0.0.1"},
@@ -99,14 +99,32 @@ func CreateTLSSecret(ctx context.Context, k8sClient *K8sClient, namespace, secre
 
 // CreateTLSConfig creates a tls.Config for client connections with the given certificate
 func CreateTLSConfig(certPEM []byte) (*tls.Config, error) {
+	// Parse the certificate to extract the CN or DNS names
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM certificate")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse certificate: %w", err)
+	}
+
 	// Create certificate pool and add the certificate
 	certPool := x509.NewCertPool()
 	if !certPool.AppendCertsFromPEM(certPEM) {
 		return nil, fmt.Errorf("failed to parse certificate")
 	}
 
+	// Determine server name - prefer first DNS name, fallback to CN
+	serverName := "localhost"
+	if len(cert.DNSNames) > 0 {
+		serverName = cert.DNSNames[0]
+	} else if cert.Subject.CommonName != "" {
+		serverName = cert.Subject.CommonName
+	}
+
 	return &tls.Config{
-		RootCAs: certPool,
+		RootCAs:    certPool,
+		ServerName: serverName,
 	}, nil
 }
-

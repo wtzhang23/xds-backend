@@ -1,42 +1,42 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ .FileEdsDeploymentName }}
+  name: {{ .FileXdsDeploymentName }}
   namespace: {{ .EnvoyGatewayNamespace }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: {{ .FileEdsDeploymentName }}
+      app: {{ .FileXdsDeploymentName }}
   template:
     metadata:
       labels:
-        app: {{ .FileEdsDeploymentName }}
+        app: {{ .FileXdsDeploymentName }}
     spec:
       containers:
-      - name: fileeds
+      - name: filexds
         image: {{ .ExtensionServerImageRepo }}:{{ .ExtensionServerImageTag }}
         imagePullPolicy: {{ .ImagePullPolicy }}
         command:
         - /xds-backend-extension-server
-        - fileeds
+        - filexds
         - --host
         - "0.0.0.0"
         - --grpc-port
-        - "{{ .FileEdsPort }}"
+        - "{{ .FileXdsPort }}"
         - --file-path
-        - {{ .FileEdsConfigPath }}
+        - {{ .FileXdsConfigPath }}
         - --log-level
         - "debug"
         ports:
-        - containerPort: {{ .FileEdsPort }}
+        - containerPort: {{ .FileXdsPort }}
           name: grpc
         volumeMounts:
-        - name: eds-config
-          mountPath: {{ .FileEdsConfigDir }}
+        - name: xds-config
+          mountPath: {{ .FileXdsConfigDir }}
           readOnly: true
       volumes:
-      - name: eds-config
+      - name: xds-config
         configMap:
-          name: {{ .FileEdsConfigMapName }}
+          name: {{ .FileXdsServerConfigMapName }}
 

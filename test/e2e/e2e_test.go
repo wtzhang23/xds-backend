@@ -24,10 +24,12 @@ var (
 	extensionDeployer *ExtensionServerDeployer
 	testService       *TestServiceDeployer
 	envoyGatewayImage string
+	runExperimental   bool
 )
 
 func init() {
 	flag.StringVar(&envoyGatewayImage, "envoy-gateway-image", "", "Envoy Gateway Docker image (e.g., envoyproxy/gateway:v1.6.0 or envoyproxy/gateway:latest). If empty, uses the default from the Helm chart.")
+	flag.BoolVar(&runExperimental, "experimental", false, "Run experimental tests (e.g., BackendTLSPolicy test)")
 }
 
 func TestE2E(t *testing.T) {
@@ -151,27 +153,45 @@ var _ = BeforeSuite(func() {
 	Expect(k8sClient.WaitForCRD(ctx, "backendtlspolicies.gateway.networking.k8s.io")).To(Succeed())
 	defaultLogger.Log("✓ Common CRDs are available")
 
-	defaultLogger.Log("Creating EDS ConfigMap...")
+	defaultLogger.Log("Creating filexds server and Envoy ConfigMaps...")
 	testServiceIP, err := testService.GetServiceClusterIP(ctx, TestNamespace, TestServiceName)
 	Expect(err).NotTo(HaveOccurred())
-	Expect(applyTemplate(ctx, k8sClient, "eds-configmap.yaml", EdsConfigMapTemplate{
-		EdsConfigMapName:      EdsConfigMapName,
+
+	// Get the TLS certificate from the test service secret to include in the ConfigMaps
+	// Note: backendCertPEM is already available from earlier in BeforeSuite
+	caCertPEM := string(backendCertPEM)
+
+	// Create filexds server ConfigMap (for the filexds server to serve xDS resources)
+	Expect(applyTemplate(ctx, k8sClient, "filexds-server-configmap.yaml", FileXdsServerConfigMapTemplate{
+		FileXdsServerConfigMapName: FileXdsServerConfigMapName,
+		EnvoyGatewayNamespace:      EnvoyGatewayNamespace,
+		TestServiceName:            TestServiceName,
+		TestServiceIP:              testServiceIP,
+		TestServicePort:            TestServicePort,
+		TestServiceTLSPort:         TestServiceTLSPort,
+		TlsCaCertPEM:               caCertPEM,
+		TlsCaCertName:              InlineTLSCACertResourceName,
+	})).To(Succeed())
+
+	// Create Envoy EDS ConfigMap (for Envoy's file-based EDS)
+	Expect(applyTemplate(ctx, k8sClient, "envoy-eds-configmap.yaml", EnvoyEdsConfigMapTemplate{
+		EnvoyEdsConfigMapName: EnvoyEdsConfigMapName,
 		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
 		TestServiceName:       TestServiceName,
 		TestServiceIP:         testServiceIP,
 		TestServicePort:       TestServicePort,
 	})).To(Succeed())
-	defaultLogger.Log("✓ EDS ConfigMap created")
+	defaultLogger.Log("✓ Filexds server and Envoy ConfigMaps created")
 
 	defaultLogger.Log("Creating EnvoyProxy...")
-	fileEdsServiceFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", FileEdsServiceName, EnvoyGatewayNamespace)
+	fileXdsServiceFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", FileXdsServiceName, EnvoyGatewayNamespace)
 	err = applyTemplate(ctx, k8sClient, "envoyproxy.yaml", EnvoyProxyTemplate{
 		GatewayClassName:      GatewayClassName,
 		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
-		EdsConfigMapName:      EdsConfigMapName,
-		FileEdsClusterName:    FileEdsClusterName,
-		FileEdsServiceFQDN:    fileEdsServiceFQDN,
-		FileEdsPort:           FileEdsPort,
+		EnvoyEdsConfigMapName: EnvoyEdsConfigMapName,
+		FileXdsClusterName:    FileXdsClusterName,
+		FileXdsServiceFQDN:    fileXdsServiceFQDN,
+		FileXdsPort:           FileXdsPort,
 	})
 	if err != nil {
 		defaultLogger.Logf("Warning: Failed to create EnvoyProxy (may already exist): %v", err)
@@ -197,43 +217,33 @@ var _ = BeforeSuite(func() {
 	Expect(k8sClient.WaitForGatewayReady(ctx, EnvoyGatewayNamespace, GatewayName, DeploymentTimeout)).To(Succeed())
 	defaultLogger.Log("✓ Gateway created and ready")
 
-	defaultLogger.Log("Deploying fileeds server...")
-	testServiceIP, err = testService.GetServiceClusterIP(ctx, TestNamespace, TestServiceName)
-	Expect(err).NotTo(HaveOccurred())
+	defaultLogger.Log("Deploying filexds server...")
+	// testServiceIP already obtained above when creating the ConfigMap
 
 	image := fmt.Sprintf("%s:%s", ExtensionServerImageRepo, ExtensionServerImageTag)
 	Expect(cluster.LoadImage(ctx, image)).To(Succeed())
 
-	Expect(applyTemplate(ctx, k8sClient, "fileeds-eds-configmap.yaml", FileEdsConfigMapTemplate{
-		FileEdsConfigMapName:  FileEdsConfigMapName,
+	Expect(applyTemplate(ctx, k8sClient, "filexds-deployment.yaml", FileXdsDeploymentTemplate{
+		FileXdsDeploymentName:      FileXdsDeploymentName,
+		EnvoyGatewayNamespace:      EnvoyGatewayNamespace,
+		ExtensionServerImageRepo:   ExtensionServerImageRepo,
+		ExtensionServerImageTag:    ExtensionServerImageTag,
+		ImagePullPolicy:            ImagePullPolicy,
+		FileXdsPort:                FileXdsPort,
+		FileXdsConfigPath:          FileXdsConfigPath,
+		FileXdsConfigDir:           FileXdsConfigDir,
+		FileXdsServerConfigMapName: FileXdsServerConfigMapName,
+	})).To(Succeed())
+
+	Expect(applyTemplate(ctx, k8sClient, "filexds-service.yaml", FileXdsServiceTemplate{
+		FileXdsServiceName:    FileXdsServiceName,
+		FileXdsDeploymentName: FileXdsDeploymentName,
 		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
-		TestServiceName:       TestServiceName,
-		TestServiceIP:         testServiceIP,
-		TestServicePort:       TestServicePort,
-		TestServiceTLSPort:    TestServiceTLSPort,
+		FileXdsPort:           FileXdsPort,
 	})).To(Succeed())
 
-	Expect(applyTemplate(ctx, k8sClient, "fileeds-deployment.yaml", FileEdsDeploymentTemplate{
-		FileEdsDeploymentName:    FileEdsDeploymentName,
-		EnvoyGatewayNamespace:    EnvoyGatewayNamespace,
-		ExtensionServerImageRepo: ExtensionServerImageRepo,
-		ExtensionServerImageTag:  ExtensionServerImageTag,
-		ImagePullPolicy:          ImagePullPolicy,
-		FileEdsPort:              FileEdsPort,
-		FileEdsConfigPath:        FileEdsConfigPath,
-		FileEdsConfigDir:         FileEdsConfigDir,
-		FileEdsConfigMapName:     FileEdsConfigMapName,
-	})).To(Succeed())
-
-	Expect(applyTemplate(ctx, k8sClient, "fileeds-service.yaml", FileEdsServiceTemplate{
-		FileEdsServiceName:    FileEdsServiceName,
-		FileEdsDeploymentName: FileEdsDeploymentName,
-		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
-		FileEdsPort:           FileEdsPort,
-	})).To(Succeed())
-
-	Expect(k8sClient.WaitForPodsReady(ctx, EnvoyGatewayNamespace, fmt.Sprintf("app=%s", FileEdsDeploymentName), DeploymentTimeout)).To(Succeed())
-	defaultLogger.Log("✓ Fileeds server deployed and ready")
+	Expect(k8sClient.WaitForPodsReady(ctx, EnvoyGatewayNamespace, fmt.Sprintf("app=%s", FileXdsDeploymentName), DeploymentTimeout)).To(Succeed())
+	defaultLogger.Log("✓ Filexds server deployed and ready")
 
 	defaultLogger.Log("=== E2E Test Suite Setup Complete ===")
 })

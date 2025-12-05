@@ -1,10 +1,11 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .FileEdsConfigMapName }}
+  name: {{ .FileXdsServerConfigMapName }}
   namespace: {{ .EnvoyGatewayNamespace }}
 data:
-  eds-config.yaml: |
+  # config.yaml is used by filexds server (can contain multiple resources)
+  config.yaml: |
     version_info: "1"
     resources:
     - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
@@ -25,4 +26,11 @@ data:
               socket_address:
                 address: "{{ .TestServiceIP }}"
                 port_value: {{ .TestServiceTLSPort }}
+{{ if .TlsCaCertPEM }}
+    - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret
+      name: "{{ .TlsCaCertName }}"
+      validation_context:
+        trusted_ca:
+          inline_string: "{{ .TlsCaCertPEM | yamlEscape }}"
+{{ end }}
 

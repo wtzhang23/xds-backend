@@ -89,13 +89,14 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		// Create resources
+		// Use eds-config.yaml which contains only one resource (required for file-based EDS)
 		Expect(applyTemplate(ctx, k8sClient, "xds-backend.yaml", XdsBackendTemplate{
 			XdsBackendGroup:        XdsBackendGroup,
 			XdsBackendAPIVersion:   XdsBackendAPIVersion,
 			XdsBackendKind:         XdsBackendKind,
 			XdsBackendResourceName: XdsBackendResourceName,
 			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
-			EdsConfigPath:          EdsConfigPath,
+			EdsConfigPath:          FileXdsEdsConfigPath,
 			TestServiceName:        TestServiceName,
 		})).To(Succeed())
 
@@ -256,7 +257,7 @@ var _ = Describe("xDS Backend Integration", func() {
 			XdsBackendKind:         XdsBackendKind,
 			XdsBackendResourceName: "test-xds-backend-metrics",
 			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
-			EdsConfigPath:          EdsConfigPath,
+			EdsConfigPath:          FileXdsEdsConfigPath,
 			TestServiceName:        TestServiceName,
 		})).To(Succeed())
 
@@ -289,31 +290,31 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(finalValue).To(BeNumerically(">", initialValue), "xds_backend_post_cluster_modify_total should have incremented after creating Gateway/HTTPRoute/XdsBackend")
 	})
 
-	It("should route traffic through Envoy Gateway to test service via fileeds EDS server", func() {
+	It("should route traffic through Envoy Gateway to test service via filexds EDS server", func() {
 		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(applyTemplate(ctx, k8sClient, "xds-backend-fileeds.yaml", XdsBackendFileEdsTemplate{
+		Expect(applyTemplate(ctx, k8sClient, "xds-backend-filexds.yaml", XdsBackendFileXdsTemplate{
 			XdsBackendGroup:        XdsBackendGroup,
 			XdsBackendAPIVersion:   XdsBackendAPIVersion,
 			XdsBackendKind:         XdsBackendKind,
-			XdsBackendResourceName: FileEdsXdsBackendResourceName,
+			XdsBackendResourceName: FileXdsXdsBackendResourceName,
 			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
 			TestServiceName:        TestServiceName,
-			FileEdsClusterName:     FileEdsClusterName,
+			FileXdsClusterName:     FileXdsClusterName,
 		})).To(Succeed())
 
 		Expect(applyTemplate(ctx, k8sClient, "httproute.yaml", HTTPRouteTemplate{
-			HTTPRouteName:          FileEdsHTTPRouteName,
+			HTTPRouteName:          FileXdsHTTPRouteName,
 			GatewayName:            GatewayName,
 			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
 			XdsBackendGroup:        XdsBackendGroup,
 			XdsBackendKind:         XdsBackendKind,
-			XdsBackendResourceName: FileEdsXdsBackendResourceName,
+			XdsBackendResourceName: FileXdsXdsBackendResourceName,
 			HTTPRoutePathPrefix:    HTTPRoutePathPrefixEds,
 		})).To(Succeed())
 
-		Expect(k8sClient.WaitForHTTPRouteReady(ctx, EnvoyGatewayNamespace, FileEdsHTTPRouteName, DeploymentTimeout)).To(Succeed())
+		Expect(k8sClient.WaitForHTTPRouteReady(ctx, EnvoyGatewayNamespace, FileXdsHTTPRouteName, DeploymentTimeout)).To(Succeed())
 		labelSelector := fmt.Sprintf("%s=%s,%s=%s", EnvoyProxyOwningGatewayLabelKey, GatewayName, EnvoyProxyComponentLabelKey, EnvoyProxyComponentLabelValue)
 		pods, err := k8sClient.GetClientset().CoreV1().Pods(EnvoyGatewayNamespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
 		Expect(err).NotTo(HaveOccurred())
@@ -326,7 +327,7 @@ var _ = Describe("xDS Backend Integration", func() {
 				return false, nil
 			}
 			// Check that cluster exists
-			return strings.Contains(configDump, FileEdsExpectedClusterName), nil
+			return strings.Contains(configDump, FileXdsExpectedClusterName), nil
 		})).To(Succeed())
 
 		time.Sleep(EnvoyEndpointProcessingDelay)
@@ -459,6 +460,10 @@ var _ = Describe("xDS Backend Integration", func() {
 	})
 
 	It("should support BackendTLSPolicy for xDS backend", func() {
+		if !runExperimental {
+			Skip("Skipping experimental test (use -experimental flag to enable)")
+		}
+
 		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
 
@@ -475,13 +480,13 @@ var _ = Describe("xDS Backend Integration", func() {
 			BackendTLSCACertPEM:   caCertPEM,
 		})).To(Succeed())
 
-		Expect(applyTemplate(ctx, k8sClient, "xds-backend-fileeds.yaml", XdsBackendFileEdsTemplate{
+		Expect(applyTemplate(ctx, k8sClient, "xds-backend-filexds.yaml", XdsBackendFileXdsTemplate{
 			XdsBackendGroup:        XdsBackendGroup,
 			XdsBackendAPIVersion:   XdsBackendAPIVersion,
 			XdsBackendKind:         XdsBackendKind,
 			XdsBackendResourceName: BackendTLSPolicyXdsBackendName,
 			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
-			FileEdsClusterName:     FileEdsClusterName,
+			FileXdsClusterName:     FileXdsClusterName,
 			TestServiceName:        fmt.Sprintf("%s-tls", TestServiceName),
 		})).To(Succeed())
 
@@ -683,6 +688,130 @@ var _ = Describe("xDS Backend Integration", func() {
 
 		time.Sleep(EnvoyAccessLogFlushDelay)
 	})
+
+	It("should support inline TLS configuration for xDS backend", func() {
+		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
+		Expect(err).NotTo(HaveOccurred())
+
+		// The TLS certificate is already in the filexds ConfigMap (created in BeforeSuite)
+		// The filexds ConfigMap is mounted in EnvoyProxy at /etc/envoy/xds
+
+		// Create XdsBackend with inline TLS configuration
+		// The CA cert is served by the filexds server via SDS
+		Expect(applyTemplate(ctx, k8sClient, "xds-backend-inline-tls.yaml", XdsBackendInlineTLSTemplate{
+			XdsBackendGroup:        XdsBackendGroup,
+			XdsBackendAPIVersion:   XdsBackendAPIVersion,
+			XdsBackendKind:         XdsBackendKind,
+			XdsBackendResourceName: InlineTLSXdsBackendName,
+			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
+			FileXdsClusterName:     FileXdsClusterName,
+			TestServiceName:        fmt.Sprintf("%s-tls", TestServiceName),
+			TlsCaCertName:          InlineTLSCACertResourceName,
+			TlsHostname:            InlineTLSHostname,
+		})).To(Succeed())
+
+		// Create HTTPRoute
+		Expect(applyTemplate(ctx, k8sClient, "httproute.yaml", HTTPRouteTemplate{
+			HTTPRouteName:          InlineTLSHTTPRouteName,
+			GatewayName:            GatewayName,
+			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
+			XdsBackendGroup:        XdsBackendGroup,
+			XdsBackendKind:         XdsBackendKind,
+			XdsBackendResourceName: InlineTLSXdsBackendName,
+			HTTPRoutePathPrefix:    InlineTLSPathPrefix,
+		})).To(Succeed())
+
+		By("Waiting for HTTPRoute to be ready")
+		Expect(k8sClient.WaitForHTTPRouteReady(ctx, EnvoyGatewayNamespace, InlineTLSHTTPRouteName, DeploymentTimeout)).To(Succeed())
+
+		// Wait for cluster to be created with TLS configuration
+		labelSelector := fmt.Sprintf("%s=%s,%s=%s", EnvoyProxyOwningGatewayLabelKey, GatewayName, EnvoyProxyComponentLabelKey, EnvoyProxyComponentLabelValue)
+		pods, err := k8sClient.GetClientset().CoreV1().Pods(EnvoyGatewayNamespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(pods.Items)).To(BeNumerically(">", 0))
+		podName := pods.Items[0].Name
+
+		By("Waiting for cluster to be created with TLS configuration")
+		expectedClusterName := fmt.Sprintf("httproute/%s/%s/rule/0", EnvoyGatewayNamespace, InlineTLSHTTPRouteName)
+		var lastConfigDump string
+		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
+			configDump, err := getEnvoyAdminConfigDump(ctx, k8sClient, EnvoyGatewayNamespace, podName)
+			if err != nil {
+				return false, nil
+			}
+			lastConfigDump = configDump
+			if !strings.Contains(configDump, expectedClusterName) {
+				return false, nil
+			}
+			// Verify that the cluster has TLS configuration (transport_socket with envoy.transport_sockets.tls)
+			// This ensures the Secret has been fetched and TLS is configured
+			clusterHasTLS := strings.Contains(configDump, "envoy.transport_sockets.tls")
+			return clusterHasTLS, nil
+		})).To(Succeed(), func() string {
+			clusters := extractClusterNames(lastConfigDump)
+			return fmt.Sprintf("Expected cluster %s with TLS configuration not found. Available clusters: %v", expectedClusterName, clusters)
+		})
+
+		// Setup port forward and send HTTP request
+		restConfig := k8sClient.GetConfig()
+		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", EnvoyGatewayNamespace, podName)
+		transport, upgrader, err := spdy.RoundTripperFor(restConfig)
+		Expect(err).NotTo(HaveOccurred())
+		baseURL, err := url.Parse(restConfig.Host)
+		Expect(err).NotTo(HaveOccurred())
+		baseURL.Path = path
+		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", baseURL)
+
+		stopChan := make(chan struct{}, 1)
+		readyChan := make(chan struct{}, 1)
+		errChan := make(chan error, 1)
+		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
+		fw, err := portforward.New(dialer, []string{portMapping}, stopChan, readyChan, nil, nil)
+		Expect(err).NotTo(HaveOccurred())
+
+		go func() {
+			if err := fw.ForwardPorts(); err != nil {
+				errChan <- err
+			}
+		}()
+		defer close(stopChan)
+
+		select {
+		case <-ctx.Done():
+			Fail(fmt.Sprintf("context cancelled: %v", ctx.Err()))
+		case err := <-errChan:
+			Fail(fmt.Sprintf("port forward error: %v", err))
+		case <-readyChan:
+		}
+
+		var resp *http.Response
+		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
+			client := &http.Client{Timeout: HTTPClientTimeout}
+			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, InlineTLSPathPrefix), nil)
+			if err != nil {
+				return false, err
+			}
+			req.Header.Set("Host", "*")
+
+			attemptResp, err := client.Do(req)
+			if err != nil {
+				return false, nil // Retry on network error
+			}
+
+			// Success if we get 200 OK
+			if attemptResp.StatusCode == http.StatusOK {
+				resp = attemptResp
+				return true, nil
+			}
+			// Close body and retry on 503 or other non-OK status codes
+			attemptResp.Body.Close()
+			return false, nil
+		})).To(Succeed())
+		defer resp.Body.Close()
+		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+
+		time.Sleep(EnvoyAccessLogFlushDelay)
+	})
 })
 
 func applyTemplate(ctx context.Context, k8sClient *K8sClient, templateName string, data interface{}) error {
@@ -857,24 +986,24 @@ func getExtensionServerLogs(ctx context.Context, k8sClient *K8sClient, namespace
 	return strings.Join(allLogs, "\n"), nil
 }
 
-// getFileEdsServerLogs fetches the fileeds server logs from pods, optionally filtered by time
-func getFileEdsServerLogs(ctx context.Context, k8sClient *K8sClient, namespace string, sinceTime *metav1.Time) (string, error) {
-	// Find fileeds server pods
+// getFileXdsServerLogs fetches the filexds server logs from pods, optionally filtered by time
+func getFileXdsServerLogs(ctx context.Context, k8sClient *K8sClient, namespace string, sinceTime *metav1.Time) (string, error) {
+	// Find filexds server pods
 	pods, err := k8sClient.GetClientset().CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("app=%s", FileEdsDeploymentName),
+		LabelSelector: fmt.Sprintf("app=%s", FileXdsDeploymentName),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	if len(pods.Items) == 0 {
-		return "No fileeds server pods found", nil
+		return "No filexds server pods found", nil
 	}
 
 	var allLogs []string
 	for _, pod := range pods.Items {
-		// Container name is "fileeds"
-		containerName := "fileeds"
+		// Container name is "filexds"
+		containerName := "filexds"
 		if len(pod.Spec.Containers) > 0 {
 			containerName = pod.Spec.Containers[0].Name
 		}
@@ -1118,8 +1247,8 @@ func collectLogs(ctx context.Context, k8sClient *K8sClient, testStartTime time.T
 	if extensionLogs, err := getExtensionServerLogs(ctx, k8sClient, ExtensionServerNamespace, &sinceTime); err == nil {
 		writeLogToFile("extension-server", extensionLogs)
 	}
-	if fileEdsLogs, err := getFileEdsServerLogs(ctx, k8sClient, EnvoyGatewayNamespace, &sinceTime); err == nil {
-		writeLogToFile("fileeds-server", fileEdsLogs)
+	if fileXdsLogs, err := getFileXdsServerLogs(ctx, k8sClient, EnvoyGatewayNamespace, &sinceTime); err == nil {
+		writeLogToFile("filexds-server", fileXdsLogs)
 	}
 	if testServiceLogs, err := getTestServiceLogs(ctx, k8sClient, TestNamespace, &sinceTime); err == nil {
 		writeLogToFile("test-service", testServiceLogs)

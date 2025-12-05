@@ -52,59 +52,85 @@ type XdsBackendTemplate struct {
 	TestServiceName        string
 }
 
-type XdsBackendFileEdsTemplate struct {
+type XdsBackendFileXdsTemplate struct {
 	XdsBackendGroup        string
 	XdsBackendAPIVersion   string
 	XdsBackendKind         string
 	XdsBackendResourceName string
 	EnvoyGatewayNamespace  string
-	FileEdsClusterName     string
+	FileXdsClusterName     string
 	TestServiceName        string
 }
 
-type EdsConfigMapTemplate struct {
-	EdsConfigMapName      string
-	EnvoyGatewayNamespace string
-	TestServiceName       string
-	TestServiceIP         string
-	TestServicePort       int
+type XdsBackendInlineTLSTemplate struct {
+	XdsBackendGroup        string
+	XdsBackendAPIVersion   string
+	XdsBackendKind         string
+	XdsBackendResourceName string
+	EnvoyGatewayNamespace  string
+	FileXdsClusterName     string
+	TestServiceName        string
+	TlsCaCertName          string
+	TlsHostname            string
 }
 
-type FileEdsConfigMapTemplate struct {
-	FileEdsConfigMapName  string
+
+type FileXdsConfigMapTemplate struct {
+	FileXdsConfigMapName  string
 	EnvoyGatewayNamespace string
 	TestServiceName       string
 	TestServiceIP         string
 	TestServicePort       int
 	TestServiceTLSPort    int
+	TlsCaCertPEM          string
+	TlsCaCertName         string
+}
+
+type FileXdsServerConfigMapTemplate struct {
+	FileXdsServerConfigMapName string
+	EnvoyGatewayNamespace      string
+	TestServiceName            string
+	TestServiceIP              string
+	TestServicePort            int
+	TestServiceTLSPort         int
+	TlsCaCertPEM               string
+	TlsCaCertName              string
+}
+
+type EnvoyEdsConfigMapTemplate struct {
+	EnvoyEdsConfigMapName string
+	EnvoyGatewayNamespace string
+	TestServiceName       string
+	TestServiceIP         string
+	TestServicePort       int
 }
 
 type EnvoyProxyTemplate struct {
-	GatewayClassName      string
-	EnvoyGatewayNamespace string
-	EdsConfigMapName      string
-	FileEdsClusterName    string
-	FileEdsServiceFQDN    string
-	FileEdsPort           int
+	GatewayClassName       string
+	EnvoyGatewayNamespace  string
+	EnvoyEdsConfigMapName  string
+	FileXdsClusterName     string
+	FileXdsServiceFQDN     string
+	FileXdsPort            int
 }
 
-type FileEdsDeploymentTemplate struct {
-	FileEdsDeploymentName    string
-	EnvoyGatewayNamespace    string
-	ExtensionServerImageRepo string
-	ExtensionServerImageTag  string
-	ImagePullPolicy          string
-	FileEdsPort              int
-	FileEdsConfigPath        string
-	FileEdsConfigDir         string
-	FileEdsConfigMapName     string
+type FileXdsDeploymentTemplate struct {
+	FileXdsDeploymentName     string
+	EnvoyGatewayNamespace     string
+	ExtensionServerImageRepo  string
+	ExtensionServerImageTag   string
+	ImagePullPolicy           string
+	FileXdsPort               int
+	FileXdsConfigPath         string
+	FileXdsConfigDir          string
+	FileXdsServerConfigMapName string
 }
 
-type FileEdsServiceTemplate struct {
-	FileEdsServiceName    string
-	FileEdsDeploymentName string
+type FileXdsServiceTemplate struct {
+	FileXdsServiceName    string
+	FileXdsDeploymentName string
 	EnvoyGatewayNamespace string
-	FileEdsPort           int
+	FileXdsPort           int
 }
 
 type TestServiceTLSSecretTemplate struct {

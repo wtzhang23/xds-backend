@@ -5,6 +5,8 @@ import (
 	"github.com/wtzhang23/xds-backend/pkg/types"
 	"google.golang.org/protobuf/types/known/durationpb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
+	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
 var _ types.XdsBackendConfig = (*XdsBackend)(nil)
@@ -25,12 +27,38 @@ type XdsBackend struct {
 // XdsBackendSpec defines the xDS server and resource to use to fetch endpoints for the backend.
 // +kubebuilder:object:generate=true
 type XdsBackendSpec struct {
-	// Service is the name of the service to use to fetch endpoints for the backend.
-	// If not specified, the default name used by Envoy Gateway for the backend will be used
-	// when requesting the endpoints from the xDS server.
-	//
+	// Endpoints configures how to fetch endpoints for the backend.
+	// +kubebuilder:validation:Required
+	Endpoints *XdsConfigSource `json:"endpoints,omitempty"`
+
+	// Tls configures how to configure TLS for the backend.
 	// +optional
-	Service string `json:"service,omitempty"`
+	Tls *TlsSettings `json:"tls,omitempty"`
+}
+
+// TlsSettings configures the TLS settings for the backend.
+// +kubebuilder:object:generate=true
+type TlsSettings struct {
+	// CaCertificates configures the source of truth for CA certificates.
+	// +optional
+	CaCertificates *XdsConfigSource `json:"caCertificates,omitempty"`
+	// Hostname configures the hostname to use for TLS.
+	// +optional
+	Hostname *gwapiv1.Hostname `json:"hostname,omitempty"`
+}
+
+// XdsConfigSource configures where to fetch xDS resources from.
+// +kubebuilder:object:generate=true
+type XdsConfigSource struct {
+	// Server is the name of the xDS server to use to fetch xDS resources from. This name
+	// must match the name configured in the xDS backend extension server.
+	// +optional
+	Server *ServerConfigSource `json:"server,omitempty"`
+
+	// Path is the path to the file to fetch xDS resources from. This should be used
+	// only to fetch xDS resources from a local file.
+	// +optional
+	Path *PathConfigSource `json:"path,omitempty"`
 
 	// ApiType is the protocol to use to fetch endpoints for the backend.
 	// +kubebuilder:validation:Required
@@ -38,15 +66,9 @@ type XdsBackendSpec struct {
 	// +kubebuilder:default=GRPC
 	ApiType ApiType `json:"apiType"`
 
-	// Server is the name of the xDS server to use to fetch endpoints for the backend. This name
-	// must match the name configured in the xDS backend extension server.
-	// +optional
-	Server *ServerConfigSource `json:"server,omitempty"`
-
-	// Path is the path to the file to fetch endpoints for the backend. This should be used
-	// only to fetch endpoints for the backend from a local file.
-	// +optional
-	Path *PathConfigSource `json:"path,omitempty"`
+	// Name is the xDS resourse name.
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
 }
 
 // ApiType is the protocol to use to fetch endpoints for the backend.
@@ -84,19 +106,15 @@ type ServerConfigSource struct {
 	Server string `json:"server"`
 }
 
-func (b *XdsBackend) EdsServiceName() string {
-	return b.Spec.Service
-}
-
-func (b *XdsBackend) GetConfigSource() *corev3.ConfigSource {
+func (s *XdsConfigSource) GetConfigSource() types.XdsConfigSource {
 	version := corev3.ApiVersion_V3 // Do not support other API versions for now
-	rv := &corev3.ConfigSource{
+	cfgSource := &corev3.ConfigSource{
 		ResourceApiVersion: version,
 	}
 	switch {
-	case b.Spec.Server != nil:
+	case s.Server != nil:
 		apiType := corev3.ApiConfigSource_GRPC
-		switch b.Spec.ApiType {
+		switch s.ApiType {
 		case ApiTypeGrpc:
 			apiType = corev3.ApiConfigSource_GRPC
 		case ApiTypeDeltaGrpc:
@@ -104,7 +122,7 @@ func (b *XdsBackend) GetConfigSource() *corev3.ConfigSource {
 		case ApiTypeRest:
 			apiType = corev3.ApiConfigSource_REST
 		}
-		rv.ConfigSourceSpecifier = &corev3.ConfigSource_ApiConfigSource{
+		cfgSource.ConfigSourceSpecifier = &corev3.ConfigSource_ApiConfigSource{
 			ApiConfigSource: &corev3.ApiConfigSource{
 				ApiType:             apiType,
 				TransportApiVersion: version,
@@ -112,7 +130,7 @@ func (b *XdsBackend) GetConfigSource() *corev3.ConfigSource {
 					{
 						TargetSpecifier: &corev3.GrpcService_EnvoyGrpc_{
 							EnvoyGrpc: &corev3.GrpcService_EnvoyGrpc{
-								ClusterName: b.Spec.Server.Server,
+								ClusterName: s.Server.Server,
 							},
 						},
 					},
@@ -122,24 +140,45 @@ func (b *XdsBackend) GetConfigSource() *corev3.ConfigSource {
 				},
 			},
 		}
-	case b.Spec.Path != nil:
+	case s.Path != nil:
 		var watchedDir *corev3.WatchedDirectory
-		if b.Spec.Path.WatchedDir != "" {
+		if s.Path.WatchedDir != "" {
 			watchedDir = &corev3.WatchedDirectory{
-				Path: b.Spec.Path.WatchedDir,
+				Path: s.Path.WatchedDir,
 			}
 		}
-		rv.ConfigSourceSpecifier = &corev3.ConfigSource_PathConfigSource{
+		cfgSource.ConfigSourceSpecifier = &corev3.ConfigSource_PathConfigSource{
 			PathConfigSource: &corev3.PathConfigSource{
-				Path:             b.Spec.Path.Path,
+				Path:             s.Path.Path,
 				WatchedDirectory: watchedDir,
 			},
 		}
 	default:
 		// Use ADS of envoy gateway itself to fetch endpoints for the backend
-		rv.ConfigSourceSpecifier = &corev3.ConfigSource_Ads{
+		cfgSource.ConfigSourceSpecifier = &corev3.ConfigSource_Ads{
 			Ads: &corev3.AggregatedConfigSource{},
 		}
 	}
-	return rv
+	return types.XdsConfigSource{
+		Name:         s.Name,
+		ConfigSource: cfgSource,
+	}
+}
+
+func (b *XdsBackend) GetEndpointsSource() types.XdsConfigSource {
+	return b.Spec.Endpoints.GetConfigSource()
+}
+
+func (b *XdsBackend) GetTlsSettings() *types.XdsTlsSettings {
+	if b.Spec.Tls == nil {
+		return nil
+	}
+	var caCertificates *types.XdsConfigSource
+	if b.Spec.Tls.CaCertificates != nil {
+		caCertificates = ptr.To(b.Spec.Tls.CaCertificates.GetConfigSource())
+	}
+	return &types.XdsTlsSettings{
+		CaCertificates: caCertificates,
+		Hostname:       b.Spec.Tls.Hostname,
+	}
 }

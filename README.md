@@ -1,7 +1,8 @@
 # xds-backend
 
 > [!CAUTION]
-> This is still WIP and has not been tested sufficiently in production yet!!!
+> This is still WIP and has not been tested sufficiently in production yet!!! 
+> Be warned for potential rapid schema changes during development.
 
 ## Overview
 
@@ -79,9 +80,10 @@ graph TB
 2. **xds-backend Extension Server**: A gRPC server that implements the Envoy Gateway extension interface. It receives cluster modification requests and configures clusters to use EDS with the specified config source (file path or remote xDS server).
 
 3. **XdsBackend CRD**: A custom Kubernetes resource that defines:
-   - The EDS service name
-   - The config source type (file path, remote xDS server, or ADS)
+   - The `endpoints` configuration: An `XdsConfigSource` specifying how to fetch endpoints (file path, remote xDS server, or ADS)
+   - The xDS resource name (EDS service name)
    - The API type (GRPC, DELTA_GRPC, or REST)
+   - Optional `tls` configuration for TLS-enabled backends, including CA certificate source via `XdsConfigSource`
 
 4. **Envoy Proxy**: The data plane proxy that:
    - Receives configuration from the Envoy Gateway controller
@@ -153,10 +155,12 @@ This guide provides a high-level overview of the components needed to set up xds
    - **Remote xDS Server**: Configure a static cluster in the EnvoyProxy bootstrap configuration that points to your xDS server (see [Configuring Remote xDS Server](#configuring-remote-xds-server))
 
 5. **Create XdsBackend Resource**: Define an XdsBackend resource that specifies:
-   - The EDS service name
-   - The config source (file path, remote xDS server, or ADS)
-   - The API type (GRPC, DELTA_GRPC, or REST)
-   - **Important**: If using a remote xDS server, the `server` name must match the static cluster name configured in the EnvoyProxy bootstrap
+   - The `endpoints` configuration (required): An `XdsConfigSource` with:
+     - The config source type (file path via `path`, remote xDS server via `server`, or ADS if neither is specified)
+     - The API type (GRPC, DELTA_GRPC, or REST)
+     - The xDS resource name (EDS service name)
+   - Optional `tls` configuration for TLS-enabled backends
+   - **Important**: If using a remote xDS server, the `server.server` name must match the static cluster name configured in the EnvoyProxy bootstrap
 
 6. **Create HTTPRoute**: Create an HTTPRoute that references the XdsBackend resource in its `backendRefs`. If the HTTPRoute and XdsBackend are in different namespaces, create a ReferenceGrant to allow the cross-namespace reference.
 
@@ -172,10 +176,17 @@ This guide provides a high-level overview of the components needed to set up xds
 
 The XdsBackend resource supports the following configuration:
 
-- **`service`** (optional): The service name used when requesting endpoints from the xDS server
-- **`apiType`** (required): The protocol to use (GRPC, DELTA_GRPC, or REST)
-- **`server`** (optional): Configuration for a remote xDS server
-- **`path`** (optional): Configuration for a file-based EDS source
+- **`endpoints`** (required): An `XdsConfigSource` that configures how to fetch endpoints for the backend
+  - **`server`** (optional): Configuration for a remote xDS server
+    - **`server`** (required): The name of the xDS server cluster (must match a static cluster in EnvoyProxy bootstrap)
+  - **`path`** (optional): Configuration for a file-based EDS source
+    - **`path`** (required): The file path to the EDS configuration file
+    - **`watchedDir`** (optional): The directory to watch for file changes
+  - **`apiType`** (required): The protocol to use (GRPC, DELTA_GRPC, or REST)
+  - **`name`** (required): The xDS resource name (EDS service name)
+- **`tls`** (optional): TLS configuration for the backend
+  - **`caCertificates`** (optional): An `XdsConfigSource` that configures where to fetch the CA certificate from
+  - **`hostname`** (optional): The hostname to use for TLS SNI
 
 ### Extension Server Configuration
 
@@ -242,7 +253,7 @@ data:
                 port_value: 8080
 ```
 
-**Note**: The file path specified in your `XdsBackend` resource's `spec.path.path` must match the mounted file path (e.g., `/etc/envoy/eds/eds-config.yaml`).
+**Note**: The file path specified in your `XdsBackend` resource's `spec.endpoints.path.path` must match the mounted file path (e.g., `/etc/envoy/eds/eds-config.yaml`).
 
 ### Configuring Remote xDS Server
 
@@ -281,7 +292,7 @@ spec:
           http2_protocol_options: {}
 ```
 
-**Note**: The cluster name (`my-xds-server` in the example) must match the `server` field in your `XdsBackend` resource's `spec.server.server` value.
+**Note**: The cluster name (`my-xds-server` in the example) must match the `server` field in your `XdsBackend` resource's `spec.endpoints.server.server` value.
 
 ## Examples
 
@@ -311,7 +322,7 @@ spec:
       namespace: envoy-gateway-system
 ```
 
-The corresponding `XdsBackend` resource:
+The corresponding `XdsBackend` resource for file-based EDS:
 
 ```yaml
 apiVersion: xdsbackend.wtzhang23.github.io/v1alpha1
@@ -320,11 +331,12 @@ metadata:
   name: my-backend
   namespace: envoy-gateway-system
 spec:
-  service: my-backend-service
-  apiType: GRPC
-  path:
-    path: /etc/envoy/eds/eds-config.yaml
-    watchedDir: /etc/envoy/eds
+  endpoints:
+    path:
+      path: /etc/envoy/eds/eds-config.yaml
+      watchedDir: /etc/envoy/eds
+    apiType: GRPC
+    name: my-backend-service
 ```
 
 Or, for a remote xDS server:
@@ -336,11 +348,39 @@ metadata:
   name: my-backend
   namespace: envoy-gateway-system
 spec:
-  service: my-backend-service
-  apiType: GRPC
-  server:
-    server: my-xds-server  # Must match the static cluster name in EnvoyProxy bootstrap
+  endpoints:
+    server:
+      server: my-xds-server  # Must match the static cluster name in EnvoyProxy bootstrap
+    apiType: GRPC
+    name: my-backend-service
 ```
+
+### XdsBackend with TLS Configuration
+
+You can configure TLS for the backend by specifying a `tls` section. The `caCertificates` field uses an `XdsConfigSource` to fetch the CA certificate, typically from a remote xDS server via SDS (Secret Discovery Service):
+
+```yaml
+apiVersion: xdsbackend.wtzhang23.github.io/v1alpha1
+kind: XdsBackend
+metadata:
+  name: my-backend-tls
+  namespace: envoy-gateway-system
+spec:
+  endpoints:
+    server:
+      server: my-xds-server
+    apiType: GRPC
+    name: my-backend-service
+  tls:
+    caCertificates:
+      server:
+        server: my-xds-server
+      apiType: GRPC
+      name: my-ca-cert  # Secret resource name served by the xDS server
+    hostname: "my-backend.example.com"
+```
+
+**Note**: The `caCertificates` config source should point to an xDS server that serves Secret resources via SDS. The Secret resource must have the type `envoy.extensions.transport_sockets.tls.v3.Secret` with a `validation_context` containing the trusted CA certificate.
 
 **Note**: When using cross-namespace references (HTTPRoute in a different namespace than XdsBackend), you must create a `ReferenceGrant` to allow the reference:
 

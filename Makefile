@@ -13,7 +13,11 @@ docker-build:
 	docker build -t $(IMAGE_REPO):$(IMAGE_TAG) .
 
 .PHONY: generate
-generate: generate-proto generate-controller-gen
+generate: generate-go generate-proto generate-controller-gen
+
+.PHONY: generate-go
+generate-go:
+	go generate ./...
 
 .PHONY: generate-proto
 generate-proto:
@@ -42,16 +46,12 @@ test-coverage: test
 	@go tool cover -func=bin/coverage.out | tail -1
 
 ENVOY_GATEWAY_IMAGE ?=
+RUN_EXPERIMENTAL ?= false
 
 .PHONY: test-e2e
 test-e2e: docker-build
-	@if [ -n "$(ENVOY_GATEWAY_IMAGE)" ]; then \
-		echo "Running e2e tests with Envoy Gateway image: $(ENVOY_GATEWAY_IMAGE)"; \
-		go test -v ./test/e2e/... -ginkgo.v -timeout 30m -envoy-gateway-image="$(ENVOY_GATEWAY_IMAGE)"; \
-	else \
-		echo "Running e2e tests with default Envoy Gateway image from Helm chart"; \
-		go test -v ./test/e2e/... -ginkgo.v -timeout 30m; \
-	fi
+	echo "Running e2e tests with Envoy Gateway image: $(ENVOY_GATEWAY_IMAGE)"
+	go test -v ./test/e2e/... -ginkgo.v -timeout 30m -envoy-gateway-image="$(ENVOY_GATEWAY_IMAGE)" -experimental="$(RUN_EXPERIMENTAL)"
 
 .PHONY: clean
 clean:

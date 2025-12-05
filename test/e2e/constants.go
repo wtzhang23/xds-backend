@@ -102,19 +102,19 @@ const (
 	GatewayClassName = "eg"
 	// HTTPRouteName is the name of the HTTPRoute resource for file-based EDS test
 	HTTPRouteName = "test-route-file"
-	// FileEdsHTTPRouteName is the name of the HTTPRoute resource for fileeds test
-	FileEdsHTTPRouteName = "test-route-eds"
+	// FileXdsHTTPRouteName is the name of the HTTPRoute resource for filexds test
+	FileXdsHTTPRouteName = "test-route-eds"
 	// XdsBackendResourceName is the name of the XdsBackend resource for file-based EDS test
 	XdsBackendResourceName = "test-backend-file"
-	// FileEdsXdsBackendResourceName is the name of the XdsBackend resource for fileeds test
-	FileEdsXdsBackendResourceName = "test-backend-eds"
+	// FileXdsXdsBackendResourceName is the name of the XdsBackend resource for filexds test
+	FileXdsXdsBackendResourceName = "test-backend-eds"
 	// ExpectedClusterName is the expected Envoy cluster name for the HTTPRoute
 	ExpectedClusterName = "httproute/envoy-gateway-system/test-route-file/rule/0"
-	// FileEdsExpectedClusterName is the expected Envoy cluster name for the fileeds HTTPRoute
-	FileEdsExpectedClusterName = "httproute/envoy-gateway-system/test-route-eds/rule/0"
+	// FileXdsExpectedClusterName is the expected Envoy cluster name for the filexds HTTPRoute
+	FileXdsExpectedClusterName = "httproute/envoy-gateway-system/test-route-eds/rule/0"
 	// HTTPRoutePathPrefixFile is the path prefix for the file-based EDS HTTPRoute
 	HTTPRoutePathPrefixFile = "/file"
-	// HTTPRoutePathPrefixEds is the path prefix for the fileeds HTTPRoute
+	// HTTPRoutePathPrefixEds is the path prefix for the filexds HTTPRoute
 	HTTPRoutePathPrefixEds = "/eds"
 
 	// GatewayListenerName is the name of the Gateway listener
@@ -148,27 +148,29 @@ const (
 	// LogTimestampFormat is the timestamp format for log filenames
 	LogTimestampFormat = "20060102-150405"
 
-	// EdsConfigMapName is the name of the ConfigMap containing EDS configuration
-	EdsConfigMapName = "eg-eds-config"
-	// EdsConfigPath is the path to the EDS config file in the Envoy pod
-	EdsConfigPath = "/etc/envoy/eds/eds-config.yaml"
 	// EnvoyProxyPodPort is the port that Envoy proxy listens on in the pod
 	EnvoyProxyPodPort = 10080
 
-	// FileEdsDeploymentName is the name of the fileeds deployment
-	FileEdsDeploymentName = "fileeds"
-	// FileEdsServiceName is the name of the fileeds service
-	FileEdsServiceName = "fileeds"
-	// FileEdsConfigMapName is the name of the ConfigMap containing EDS configuration for fileeds
-	FileEdsConfigMapName = "fileeds-eds-config"
-	// FileEdsPort is the gRPC port for the fileeds server
-	FileEdsPort = 5006
-	// FileEdsConfigPath is the path to the EDS config file in the fileeds pod
-	FileEdsConfigPath = "/etc/envoy/eds/eds-config.yaml"
-	// FileEdsConfigDir is the directory where the EDS config file is mounted
-	FileEdsConfigDir = "/etc/envoy/eds"
-	// FileEdsClusterName is the name of the static cluster for fileeds in Envoy bootstrap
-	FileEdsClusterName = "fileeds-server"
+	// FileXdsDeploymentName is the name of the filexds deployment
+	FileXdsDeploymentName = "filexds"
+	// FileXdsServiceName is the name of the filexds service
+	FileXdsServiceName = "filexds"
+	// FileXdsConfigMapName is deprecated, use FileXdsServerConfigMapName and EnvoyEdsConfigMapName instead
+	FileXdsConfigMapName = "filexds-config"
+	// FileXdsServerConfigMapName is the name of the ConfigMap for the filexds server configuration
+	FileXdsServerConfigMapName = "filexds-server-config"
+	// EnvoyEdsConfigMapName is the name of the ConfigMap for Envoy's file-based EDS configuration
+	EnvoyEdsConfigMapName = "envoy-eds-config"
+	// FileXdsPort is the gRPC port for the filexds server
+	FileXdsPort = 5006
+	// FileXdsConfigPath is the path to the xDS config file in the filexds pod (used by filexds server)
+	FileXdsConfigPath = "/etc/envoy/xds/config.yaml"
+	// FileXdsConfigDir is the directory where the xDS config file is mounted
+	FileXdsConfigDir = "/etc/envoy/xds"
+	// FileXdsEdsConfigPath is the path to the EDS config file for file-based EDS (single resource only)
+	FileXdsEdsConfigPath = "/etc/envoy/xds/eds-config.yaml"
+	// FileXdsClusterName is the name of the static cluster for filexds in Envoy bootstrap
+	FileXdsClusterName = "filexds-server"
 
 	// BackendTLSPolicyTest constants
 	BackendTLSPolicyHTTPRouteName  = "test-route-backend-tls"
@@ -183,4 +185,11 @@ const (
 	TestServiceTLSSecretName       = "test-service-tls"
 	BackendTLSEdsConfigMapName     = "backend-tls-eds-config"
 	BackendTLSEdsConfigPath        = "/etc/envoy/eds/backend-tls-eds-config.yaml"
+
+	// InlineTLS test constants
+	InlineTLSHTTPRouteName         = "test-route-inline-tls"
+	InlineTLSXdsBackendName        = "test-backend-inline-tls"
+	InlineTLSCACertResourceName   = "inline-tls-ca"
+	InlineTLSPathPrefix            = "/inline-tls"
+	InlineTLSHostname              = "test-http-service.test-namespace.svc.cluster.local"
 )

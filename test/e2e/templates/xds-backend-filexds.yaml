@@ -4,8 +4,9 @@ metadata:
   name: {{ .XdsBackendResourceName }}
   namespace: {{ .EnvoyGatewayNamespace }}
 spec:
-  server:
-    server: {{ .FileEdsClusterName }}
-  service: {{ .TestServiceName }}
-  apiType: GRPC
+  endpoints:
+    server:
+      server: {{ .FileXdsClusterName }}
+    apiType: GRPC
+    name: {{ .TestServiceName }}
 

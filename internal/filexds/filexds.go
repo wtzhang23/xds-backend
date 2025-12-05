@@ -1,5 +1,5 @@
-// fileeds is a package that sources endpoints from a local file and advertises them as an EDS server.
-package fileeds
+// filexds is a package that sources xDS resources from a local file and advertises them as an xDS server.
+package filexds
 
 import (
 	"context"
@@ -12,10 +12,20 @@ import (
 	"sync"
 	"syscall"
 
+	_ "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
-	endpointv3 "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
+	_ "github.com/envoyproxy/go-control-plane/envoy/config/endpoint/v3"
+	_ "github.com/envoyproxy/go-control-plane/envoy/config/listener/v3"
+	_ "github.com/envoyproxy/go-control-plane/envoy/config/route/v3"
+	_ "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
+
+	clusterservice "github.com/envoyproxy/go-control-plane/envoy/service/cluster/v3"
 	discoveryv3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	endpointservice "github.com/envoyproxy/go-control-plane/envoy/service/endpoint/v3"
+	extensionservice "github.com/envoyproxy/go-control-plane/envoy/service/extension/v3"
+	listenerservice "github.com/envoyproxy/go-control-plane/envoy/service/listener/v3"
+	routeservice "github.com/envoyproxy/go-control-plane/envoy/service/route/v3"
+	secretservice "github.com/envoyproxy/go-control-plane/envoy/service/secret/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/cache/types"
 	cachev3 "github.com/envoyproxy/go-control-plane/pkg/cache/v3"
 	resourcev3 "github.com/envoyproxy/go-control-plane/pkg/resource/v3"
@@ -36,7 +46,7 @@ const catchAllHash = "catch-all-hash"
 var grpcServer *grpc.Server
 var grpcTLSServer *grpc.Server
 
-func StartEdsServer(host string, port int, filePath string, logger *slog.Logger, tlsConfig *tlsconfig.Config, tlsPort int) error {
+func StartXdsServer(host string, port int, filePath string, logger *slog.Logger, tlsConfig *tlsconfig.Config, tlsPort int) error {
 	snapshotCache, err := createAndStartCache(filePath, logger)
 	if err != nil {
 		return err
@@ -45,7 +55,7 @@ func StartEdsServer(host string, port int, filePath string, logger *slog.Logger,
 	var wg sync.WaitGroup
 
 	// Create plain gRPC server
-	plainServer := createEdsGRPCServer(snapshotCache, logger, nil)
+	plainServer := createXdsGRPCServer(snapshotCache, logger, nil)
 	grpcServer = plainServer
 
 	// Start plain gRPC server
@@ -64,7 +74,7 @@ func StartEdsServer(host string, port int, filePath string, logger *slog.Logger,
 
 	// Create and start TLS gRPC server if configured
 	if tlsConfig != nil && tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
-		tlsServer := createEdsGRPCServer(snapshotCache, logger, tlsConfig)
+		tlsServer := createXdsGRPCServer(snapshotCache, logger, tlsConfig)
 		grpcTLSServer = tlsServer
 
 		tlsLis, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(tlsPort)))
@@ -86,7 +96,7 @@ func StartEdsServer(host string, port int, filePath string, logger *slog.Logger,
 	return nil
 }
 
-func createEdsGRPCServer(snapshotCache cachev3.Cache, logger *slog.Logger, tlsConfig *tlsconfig.Config) *grpc.Server {
+func createXdsGRPCServer(snapshotCache cachev3.Cache, logger *slog.Logger, tlsConfig *tlsconfig.Config) *grpc.Server {
 	server := xdsv3.NewServer(context.Background(), snapshotCache, nil)
 	var opts []grpc.ServerOption
 	opts = append(opts, grpc.ChainUnaryInterceptor(
@@ -100,7 +110,13 @@ func createEdsGRPCServer(snapshotCache cachev3.Cache, logger *slog.Logger, tlsCo
 	opts = tlsconfig.AddTLSCredentials(opts, tlsConfig, logger)
 
 	grpcServer := grpc.NewServer(opts...)
+	discoveryv3.RegisterAggregatedDiscoveryServiceServer(grpcServer, server)
 	endpointservice.RegisterEndpointDiscoveryServiceServer(grpcServer, server)
+	clusterservice.RegisterClusterDiscoveryServiceServer(grpcServer, server)
+	routeservice.RegisterRouteDiscoveryServiceServer(grpcServer, server)
+	listenerservice.RegisterListenerDiscoveryServiceServer(grpcServer, server)
+	secretservice.RegisterSecretDiscoveryServiceServer(grpcServer, server)
+	extensionservice.RegisterExtensionConfigDiscoveryServiceServer(grpcServer, server)
 
 	// Register health check service
 	healthServer := health.NewServer()
@@ -142,17 +158,16 @@ func createAndStartCache(filePath string, logger *slog.Logger) (cachev3.Cache, e
 			var response discoveryv3.DiscoveryResponse
 			protojson.Unmarshal(json, &response)
 
-			edsResources := make(map[resourcev3.Type][]types.Resource)
+			xdsResources := make(map[resourcev3.Type][]types.Resource)
 			for _, resource := range response.Resources {
-				var eds endpointv3.ClusterLoadAssignment
-				err := resource.UnmarshalTo(&eds)
+				unmarshalled, err := resource.UnmarshalNew()
 				if err != nil {
-					logger.Error("Error unmarshalling EDS resource", slog.String("error", err.Error()))
+					logger.Error("Error unmarshalling resource", slog.String("error", err.Error()))
 					continue
 				}
-				edsResources[resourcev3.EndpointType] = append(edsResources[resourcev3.EndpointType], &eds)
+				xdsResources[resource.TypeUrl] = append(xdsResources[resource.TypeUrl], unmarshalled)
 			}
-			snapshot, err := cachev3.NewSnapshot(response.VersionInfo, edsResources)
+			snapshot, err := cachev3.NewSnapshot(response.VersionInfo, xdsResources)
 			if err != nil {
 				return err
 			}
