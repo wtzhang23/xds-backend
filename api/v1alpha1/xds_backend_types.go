@@ -5,6 +5,7 @@ import (
 	"github.com/wtzhang23/xds-backend/pkg/types"
 	"google.golang.org/protobuf/types/known/durationpb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	gwapiv1 "sigs.k8s.io/gateway-api/apis/v1"
 )
 
@@ -40,7 +41,7 @@ type XdsBackendSpec struct {
 type TlsSettings struct {
 	// CaCertificates configures the source of truth for CA certificates.
 	// +optional
-	CaCertificates []*XdsConfigSource `json:"caCertificates,omitempty"`
+	CaCertificates *XdsConfigSource `json:"caCertificates,omitempty"`
 	// Hostname configures the hostname to use for TLS.
 	// +optional
 	Hostname *gwapiv1.Hostname `json:"hostname,omitempty"`
@@ -172,9 +173,9 @@ func (b *XdsBackend) GetTlsSettings() *types.XdsTlsSettings {
 	if b.Spec.Tls == nil {
 		return nil
 	}
-	caCertificates := make([]types.XdsConfigSource, len(b.Spec.Tls.CaCertificates))
-	for i, caCertificate := range b.Spec.Tls.CaCertificates {
-		caCertificates[i] = caCertificate.GetConfigSource()
+	var caCertificates *types.XdsConfigSource
+	if b.Spec.Tls.CaCertificates != nil {
+		caCertificates = ptr.To(b.Spec.Tls.CaCertificates.GetConfigSource())
 	}
 	return &types.XdsTlsSettings{
 		CaCertificates: caCertificates,

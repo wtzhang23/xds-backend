@@ -44,14 +44,8 @@ func (in *TlsSettings) DeepCopyInto(out *TlsSettings) {
 	*out = *in
 	if in.CaCertificates != nil {
 		in, out := &in.CaCertificates, &out.CaCertificates
-		*out = make([]*XdsConfigSource, len(*in))
-		for i := range *in {
-			if (*in)[i] != nil {
-				in, out := &(*in)[i], &(*out)[i]
-				*out = new(XdsConfigSource)
-				(*in).DeepCopyInto(*out)
-			}
-		}
+		*out = new(XdsConfigSource)
+		(*in).DeepCopyInto(*out)
 	}
 	if in.Hostname != nil {
 		in, out := &in.Hostname, &out.Hostname

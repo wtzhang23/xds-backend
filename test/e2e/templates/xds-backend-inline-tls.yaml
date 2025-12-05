@@ -5,9 +5,15 @@ metadata:
   namespace: {{ .EnvoyGatewayNamespace }}
 spec:
   endpoints:
-    path:
-      path: {{ .EdsConfigPath }}
-      watchedDir: /etc/envoy/xds
+    server:
+      server: {{ .FileXdsClusterName }}
     apiType: GRPC
     name: {{ .TestServiceName }}
+  tls:
+    caCertificates:
+      server:
+        server: {{ .FileXdsClusterName }}
+      apiType: GRPC
+      name: {{ .TlsCaCertName }}
+    hostname: "{{ .TlsHostname }}"
 

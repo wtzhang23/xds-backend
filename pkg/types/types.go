@@ -22,6 +22,6 @@ type XdsConfigSource struct {
 }
 
 type XdsTlsSettings struct {
-	CaCertificates []XdsConfigSource
+	CaCertificates *XdsConfigSource
 	Hostname       *gwapiv1.Hostname
 }

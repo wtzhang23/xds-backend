@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
-	"strings"
 
 	pb "github.com/envoyproxy/gateway/proto/extension"
 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
@@ -186,19 +185,21 @@ func (s *Server) configureTLSForCluster(ctx context.Context, cluster *clusterv3.
 	if tlsSettings.Hostname != nil {
 		newUpstreamTlsContext.Sni = string(*tlsSettings.Hostname)
 	}
-	addedCertNames := make([]string, 0, len(tlsSettings.CaCertificates))
-	if len(tlsSettings.CaCertificates) > 0 {
+
+	addedCertName := "<none>"
+	if tlsSettings.CaCertificates != nil {
 		if newUpstreamTlsContext.CommonTlsContext == nil {
 			newUpstreamTlsContext.CommonTlsContext = &tlsv3.CommonTlsContext{}
 		}
-		newUpstreamTlsContext.CommonTlsContext.TlsCertificates = nil
 
-		for _, caCertificate := range tlsSettings.CaCertificates {
-			newUpstreamTlsContext.CommonTlsContext.TlsCertificateSdsSecretConfigs = append(newUpstreamTlsContext.CommonTlsContext.TlsCertificateSdsSecretConfigs, &tlsv3.SdsSecretConfig{
-				Name: caCertificate.Name,
-			})
-			addedCertNames = append(addedCertNames, caCertificate.Name)
+		validationContextSdsConfig := &tlsv3.SdsSecretConfig{
+			Name:      tlsSettings.CaCertificates.Name,
+			SdsConfig: tlsSettings.CaCertificates.ConfigSource,
 		}
+		newUpstreamTlsContext.CommonTlsContext.ValidationContextType = &tlsv3.CommonTlsContext_ValidationContextSdsSecretConfig{
+			ValidationContextSdsSecretConfig: validationContextSdsConfig,
+		}
+		addedCertName = tlsSettings.CaCertificates.Name
 	}
 
 	// Add new TLS settings to cluster
@@ -213,5 +214,5 @@ func (s *Server) configureTLSForCluster(ctx context.Context, cluster *clusterv3.
 			TypedConfig: typedConfig,
 		},
 	}
-	s.log.DebugContext(ctx, "Cluster configured for TLS", slog.String("cluster", cluster.Name), slog.String("added_certs", strings.Join(addedCertNames, ", ")))
+	s.log.DebugContext(ctx, "Cluster configured for TLS", slog.String("cluster", cluster.Name), slog.String("added_cert", addedCertName))
 }

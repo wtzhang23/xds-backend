@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ .FileEdsServiceName }}
+  name: {{ .FileXdsServiceName }}
   namespace: {{ .EnvoyGatewayNamespace }}
 spec:
   selector:
-    app: {{ .FileEdsDeploymentName }}
+    app: {{ .FileXdsDeploymentName }}
   ports:
-  - port: {{ .FileEdsPort }}
-    targetPort: {{ .FileEdsPort }}
+  - port: {{ .FileXdsPort }}
+    targetPort: {{ .FileXdsPort }}
     protocol: TCP
     name: grpc
 

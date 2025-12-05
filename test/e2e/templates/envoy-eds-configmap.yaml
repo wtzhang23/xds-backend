@@ -1,9 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ .EdsConfigMapName }}
+  name: {{ .EnvoyEdsConfigMapName }}
   namespace: {{ .EnvoyGatewayNamespace }}
 data:
+  # eds-config.yaml is used for file-based EDS (must contain only one resource)
   eds-config.yaml: |
     version_info: "1"
     resources:
