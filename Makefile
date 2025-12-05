@@ -50,17 +50,8 @@ RUN_EXPERIMENTAL ?= false
 
 .PHONY: test-e2e
 test-e2e: docker-build
-	@EXPERIMENTAL_FLAG=""; \
-	if [ "$(RUN_EXPERIMENTAL)" = "true" ]; then \
-		EXPERIMENTAL_FLAG="-experimental"; \
-	fi; \
-	if [ -n "$(ENVOY_GATEWAY_IMAGE)" ]; then \
-		echo "Running e2e tests with Envoy Gateway image: $(ENVOY_GATEWAY_IMAGE)"; \
-		go test -v ./test/e2e/... -ginkgo.v -timeout 30m -envoy-gateway-image="$(ENVOY_GATEWAY_IMAGE)" $$EXPERIMENTAL_FLAG; \
-	else \
-		echo "Running e2e tests with default Envoy Gateway image from Helm chart"; \
-		go test -v ./test/e2e/... -ginkgo.v -timeout 30m $$EXPERIMENTAL_FLAG; \
-	fi
+	echo "Running e2e tests with Envoy Gateway image: $(ENVOY_GATEWAY_IMAGE)"
+	go test -v ./test/e2e/... -ginkgo.v -timeout 30m -envoy-gateway-image="$(ENVOY_GATEWAY_IMAGE)" -experimental="$(RUN_EXPERIMENTAL)"
 
 .PHONY: clean
 clean:
