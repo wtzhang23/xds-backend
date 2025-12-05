@@ -1,0 +1,4 @@
+# This file is a reference for the Helm values needed for sidecar deployment
+# Apply these values when installing Envoy Gateway via Helm
+# Example: helm install eg oci://docker.io/envoyproxy/gateway-helm -f values-sidecar.yaml
+

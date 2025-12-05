@@ -187,9 +187,9 @@ const (
 	BackendTLSEdsConfigPath        = "/etc/envoy/eds/backend-tls-eds-config.yaml"
 
 	// InlineTLS test constants
-	InlineTLSHTTPRouteName         = "test-route-inline-tls"
-	InlineTLSXdsBackendName        = "test-backend-inline-tls"
-	InlineTLSCACertResourceName   = "inline-tls-ca"
-	InlineTLSPathPrefix            = "/inline-tls"
-	InlineTLSHostname              = "test-http-service.test-namespace.svc.cluster.local"
+	InlineTLSHTTPRouteName      = "test-route-inline-tls"
+	InlineTLSXdsBackendName     = "test-backend-inline-tls"
+	InlineTLSCACertResourceName = "inline-tls-ca"
+	InlineTLSPathPrefix         = "/inline-tls"
+	InlineTLSHostname           = "test-http-service.test-namespace.svc.cluster.local"
 )

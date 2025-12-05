@@ -1,0 +1,27 @@
+# Helm values for Envoy Gateway with xDS Backend extension server as sidecar
+# This configuration uses Unix Domain Socket (UDS) for communication between
+# Envoy Gateway and the extension server sidecar.
+
+config:
+  envoyGateway:
+    gateway:
+      controllerName: gateway.envoyproxy.io/gatewayclass-controller
+    logging:
+      level:
+        default: info
+    extensionManager:
+      backendResources:
+      - group: xdsbackend.wtzhang23.github.io
+        version: v1alpha1
+        kind: XdsBackend
+      hooks:
+        xdsTranslator:
+          post:
+          - Cluster
+      service:
+        # Use Unix Domain Socket for sidecar communication
+        # Note: Envoy Gateway may need to support this format
+        # If not supported, you may need to use localhost:port instead
+        unix:
+          path: /tmp/xds-backend.sock
+

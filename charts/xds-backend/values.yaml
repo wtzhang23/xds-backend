@@ -14,6 +14,11 @@ envoyGateway:
     # ClusterRoleBinding name
     clusterRoleBindingName: "envoy-gateway-xds-backend-reader-binding"
 
+# Enable or disable the extension server deployment
+# Set to false when deploying as a sidecar or using an external extension server
+deployment:
+  enabled: true
+
 # This will set the replicaset count more information can be found here: https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
 replicaCount: 1
 
@@ -69,10 +74,13 @@ service:
   # This sets the service type more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/#publishing-services-service-types
   type: ClusterIP
   # This sets the ports more information can be found here: https://kubernetes.io/docs/concepts/services-networking/service/#field-spec-ports
+  # grpcPort must be explicitly set to a non-zero value to enable TCP listener
+  # If set to 0, TCP listener will not be started
   grpcPort: 5005
   httpPort: 8080
   metricsPort: 8081
   # Enable plaintext gRPC endpoint (default: true)
+  # Note: grpcPort must be explicitly set (non-zero) for TCP listener to be enabled
   enablePlaintext: true
   # TLS configuration for gRPC endpoint
   tls:
@@ -82,6 +90,8 @@ service:
     grpcPort: 5006
     # Secret name containing TLS certificate and key
     # The secret should have keys: tls.crt and tls.key
+    # This secret must be created separately (e.g., using cert-manager or kubectl)
+    # Example: kubectl create secret tls <secret-name> --cert=tls.crt --key=tls.key
     secretName: ""
     # Path to certificate file in the container (default: /etc/tls/tls.crt)
     certPath: "/etc/tls/tls.crt"

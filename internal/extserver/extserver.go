@@ -2,6 +2,7 @@
 package extserver
 
 import (
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -27,18 +28,24 @@ import (
 var grpcServer *grpc.Server
 var grpcTLSServer *grpc.Server
 var httpServer *http.Server
+var grpcUdsPath string
+
+type ExtensionServerConfig struct {
+	Host        string
+	GrpcPort    int
+	HttpPort    int
+	TlsConfig   *tlsconfig.Config
+	TlsPort     int
+	UdsPath     string
+	MetricsPort int
+	LogLevel    slog.Level
+}
 
 func StartExtensionServer(
-	host string,
-	grpcPort int,
-	httpPort int,
-	metricsPort int,
-	logLevel slog.Level,
-	tlsConfig *tlsconfig.Config,
-	tlsPort int,
+	cfg *ExtensionServerConfig,
 ) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: logLevel,
+		Level: cfg.LogLevel,
 	}))
 
 	var wg sync.WaitGroup
@@ -47,7 +54,7 @@ func StartExtensionServer(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := startHTTPServer(net.JoinHostPort(host, strconv.Itoa(httpPort)), logger); err != nil {
+		if err := startHTTPServer(net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.HttpPort)), logger); err != nil {
 			logger.Error("HTTP server error", slog.String("error", err.Error()))
 		}
 	}()
@@ -56,7 +63,7 @@ func StartExtensionServer(
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := startMetricsServer(net.JoinHostPort(host, strconv.Itoa(metricsPort)), logger); err != nil {
+		if err := startMetricsServer(net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.MetricsPort)), logger); err != nil {
 			logger.Error("Metrics server error", slog.String("error", err.Error()))
 		}
 	}()
@@ -67,22 +74,58 @@ func StartExtensionServer(
 		&handler.XdsBackendHandler{},
 	)
 
-	// Create and start plain gRPC server if port is provided (non-zero)
-	if grpcPort > 0 {
-		plainServer := createGRPCServer(logger, nil, extensionServer)
-		grpcServer = plainServer
+	// Create a shared gRPC server instance for both TCP and UDS listeners
+	// At least one of TCP (grpcPort > 0) or UDS (udsPath != "") must be configured
+	if cfg.GrpcPort <= 0 && cfg.UdsPath == "" {
+		return fmt.Errorf("at least one of grpc-port (must be > 0) or grpc-uds-path must be specified")
+	}
 
-		// Start plain gRPC server on the first port
-		plainLis, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(grpcPort)))
+	var plainServer *grpc.Server
+	if cfg.GrpcPort > 0 || cfg.UdsPath != "" {
+		plainServer = createGRPCServer(logger, nil, extensionServer)
+		grpcServer = plainServer
+	}
+
+	// Start TCP listener if port is explicitly provided (non-zero)
+	if cfg.GrpcPort > 0 {
+		tcpLis, err := net.Listen("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.GrpcPort)))
 		if err != nil {
 			return err
 		}
-		logger.Info("Starting gRPC extension server", slog.String("grpc-address", plainLis.Addr().String()))
+		logger.Info("Starting gRPC extension server (TCP)", slog.String("grpc-address", tcpLis.Addr().String()))
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := plainServer.Serve(plainLis); err != nil {
-				logger.Error("gRPC server error", slog.String("error", err.Error()))
+			if err := plainServer.Serve(tcpLis); err != nil {
+				logger.Error("gRPC TCP server error", slog.String("error", err.Error()))
+			}
+		}()
+	}
+
+	// Start UDS listener if path is provided (can run alongside TCP)
+	if cfg.UdsPath != "" {
+		// Store UDS path for cleanup on shutdown
+		grpcUdsPath = cfg.UdsPath
+		// Remove existing socket file if it exists
+		if _, err := os.Stat(cfg.UdsPath); err == nil {
+			if err := os.Remove(cfg.UdsPath); err != nil {
+				return err
+			}
+		}
+		udsLis, err := net.Listen("unix", cfg.UdsPath)
+		if err != nil {
+			return err
+		}
+		logger.Info("Starting gRPC extension server (UDS)", slog.String("grpc-address", udsLis.Addr().String()))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := plainServer.Serve(udsLis); err != nil {
+				logger.Error("gRPC UDS server error", slog.String("error", err.Error()))
+			}
+			// Clean up UDS socket file on shutdown
+			if grpcUdsPath != "" {
+				os.Remove(grpcUdsPath)
 			}
 		}()
 	}
@@ -92,10 +135,10 @@ func StartExtensionServer(
 	// A single server instance can serve multiple listeners, but TLS is all-or-nothing
 	// at the server level. To have one plain and one TLS listener, we need two servers.
 	// Both servers share the same extension server instance.
-	if tlsConfig != nil && tlsConfig.CertFile != "" && tlsConfig.KeyFile != "" {
-		tlsServer := createGRPCServer(logger, tlsConfig, extensionServer)
+	if cfg.TlsConfig != nil && cfg.TlsConfig.CertFile != "" && cfg.TlsConfig.KeyFile != "" {
+		tlsServer := createGRPCServer(logger, cfg.TlsConfig, extensionServer)
 		grpcTLSServer = tlsServer
-		tlsLis, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(tlsPort)))
+		tlsLis, err := net.Listen("tcp", net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.TlsPort)))
 		if err != nil {
 			return err
 		}
@@ -189,6 +232,10 @@ func HandleSignals() error {
 			}
 			if grpcTLSServer != nil {
 				grpcTLSServer.Stop()
+			}
+			// Clean up UDS socket file on shutdown
+			if grpcUdsPath != "" {
+				os.Remove(grpcUdsPath)
 			}
 			os.Exit(0)
 		}

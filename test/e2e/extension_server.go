@@ -50,11 +50,6 @@ func (e *ExtensionServerDeployer) SetCluster(cluster *KindCluster) {
 	e.cluster = cluster
 }
 
-// Deploy deploys the extension server using Helm
-func (e *ExtensionServerDeployer) Deploy(ctx context.Context, namespace string) error {
-	return e.DeployWithTLS(ctx, namespace, true, false, 0, "")
-}
-
 // DeployWithTLS deploys the extension server using Helm with TLS configuration
 func (e *ExtensionServerDeployer) DeployWithTLS(ctx context.Context, namespace string, enablePlaintext bool, enableTLS bool, tlsPort int, tlsSecretName string) error {
 	e.logger.Logf("[ExtensionServer] Deploying to %s...", namespace)
@@ -109,11 +104,11 @@ func (e *ExtensionServerDeployer) DeployWithTLS(ctx context.Context, namespace s
 	valuesTemplateData := ExtensionServerValuesTemplate{
 		ExtensionServerImageRepo:       ExtensionServerImageRepo,
 		ExtensionServerImageTag:        ExtensionServerImageTag,
-		ImagePullPolicy:                 ImagePullPolicy,
-		ExtensionServerEnablePlaintext:  enablePlaintext,
-		ExtensionServerTLSEnabled:       enableTLS,
-		ExtensionServerTLSPort:          tlsPort,
-		ExtensionServerTLSSecretName:    tlsSecretName,
+		ImagePullPolicy:                ImagePullPolicy,
+		ExtensionServerEnablePlaintext: enablePlaintext,
+		ExtensionServerTLSEnabled:      enableTLS,
+		ExtensionServerTLSPort:         tlsPort,
+		ExtensionServerTLSSecretName:   tlsSecretName,
 	}
 	valuesTemplatePath := "extension-server-values.yaml"
 	values, err := LoadHelmValues(valuesTemplatePath, valuesTemplateData)

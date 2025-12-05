@@ -1,3 +1,4 @@
+{{- if .Values.deployment.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -110,9 +111,6 @@ spec:
       volumes:
         - name: tls-certs
           secret:
-            {{- if .Values.service.tls.secretName }}
             secretName: {{ .Values.service.tls.secretName }}
-            {{- else }}
-            secretName: {{ printf "%s-tls" (include "xds-backend.fullname" .) }}
-            {{- end }}
       {{- end }}
+{{- end }}

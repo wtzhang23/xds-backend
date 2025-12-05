@@ -33,15 +33,17 @@ func main() {
 							KeyFile:  ctx.String("tls-key-file"),
 						}
 					}
-					return extserver.StartExtensionServer(
-						ctx.String("host"),
-						ctx.Int("grpc-port"),
-						ctx.Int("http-port"),
-						ctx.Int("metrics-port"),
-						level,
-						tlsConfig,
-						ctx.Int("tls-port"),
-					)
+					cfg := &extserver.ExtensionServerConfig{
+						Host:        ctx.String("host"),
+						GrpcPort:    ctx.Int("grpc-port"),
+						HttpPort:    ctx.Int("http-port"),
+						MetricsPort: ctx.Int("metrics-port"),
+						LogLevel:    level,
+						TlsConfig:   tlsConfig,
+						TlsPort:     ctx.Int("tls-port"),
+						UdsPath:     ctx.String("grpc-uds-path"),
+					}
+					return extserver.StartExtensionServer(cfg)
 				},
 				Flags: []cli.Flag{
 					&cli.StringFlag{
@@ -51,8 +53,13 @@ func main() {
 					},
 					&cli.IntFlag{
 						Name:  "grpc-port",
-						Usage: "the port on which to listen for gRPC requests",
-						Value: 5005,
+						Usage: "the port on which to listen for gRPC requests (TCP). Must be explicitly specified (non-zero) to enable TCP listener. Can be used alongside grpc-uds-path.",
+						Value: 0,
+					},
+					&cli.StringFlag{
+						Name:  "grpc-uds-path",
+						Usage: "Unix Domain Socket path on which to listen for gRPC requests. Can be used alongside grpc-port to serve both TCP and UDS simultaneously.",
+						Value: "",
 					},
 					&cli.IntFlag{
 						Name:  "http-port",

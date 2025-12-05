@@ -190,13 +190,57 @@ The XdsBackend resource supports the following configuration:
 
 ### Extension Server Configuration
 
+The extension server can be deployed in two modes:
+
+1. **As a Kubernetes Service** (default): Deployed as a standalone service using the Helm chart
+2. **As a Sidecar**: Deployed as a sidecar container alongside the Envoy Gateway controller
+
+#### Service Deployment
+
+> [!WARNING]
+> We do not recommend this deployment model due to the possibility for configurations to be stale due to I/O or other intermittent errors between the extension server and the sidecar.
+
 The extension server can be configured via Helm values:
 
 - **`image.repository`**: Container image repository
 - **`image.tag`**: Container image tag
 - **`image.pullPolicy`**: Image pull policy
-- **`service.grpcPort`**: gRPC server port (default: 5005)
+- **`service.grpcPort`**: gRPC server port for TCP listener (default: 5005). Must be explicitly set to a non-zero value to enable TCP listener.
 - **`service.httpPort`**: HTTP health check port (default: 8080)
+
+**Note**: For sidecar deployments, UDS can be configured directly via the container arguments (see [sidecar deployment documentation](config/sidecar/README.md)). The Helm chart only supports TCP listener configuration.
+
+Install using Helm:
+
+```bash
+helm install xds-backend ./charts/xds-backend \
+  --namespace xds-backend-system \
+  --create-namespace
+```
+
+#### Sidecar Deployment
+
+For sidecar deployment, patch the Envoy Gateway deployment to add the extension server as a sidecar container. See the [sidecar deployment documentation](config/sidecar/README.md) for detailed instructions.
+
+**Quick Start:**
+
+1. Install Envoy Gateway with sidecar configuration:
+   ```bash
+   helm install eg oci://docker.io/envoyproxy/gateway-helm \
+     --namespace envoy-gateway-system \
+     --create-namespace \
+     -f config/sidecar/values-sidecar.yaml
+   ```
+
+2. Patch the deployment to add the sidecar:
+   ```bash
+   kubectl patch deployment envoy-gateway -n envoy-gateway-system --type='json' -p='[...]'
+   ```
+   See [config/sidecar/README.md](config/sidecar/README.md) for the complete patch command.
+
+The sidecar uses Unix Domain Socket (UDS) for communication, providing better reliability, lower latency and simplified networking compared to service-based deployment.
+
+**Note**: When using sidecar deployment, you can skip deploying the extension server via Helm by setting `deployment.enabled: false` in the Helm values.
 
 ### Configuring File-based EDS
 

@@ -74,7 +74,6 @@ type XdsBackendInlineTLSTemplate struct {
 	TlsHostname            string
 }
 
-
 type FileXdsConfigMapTemplate struct {
 	FileXdsConfigMapName  string
 	EnvoyGatewayNamespace string
@@ -106,23 +105,23 @@ type EnvoyEdsConfigMapTemplate struct {
 }
 
 type EnvoyProxyTemplate struct {
-	GatewayClassName       string
-	EnvoyGatewayNamespace  string
-	EnvoyEdsConfigMapName  string
-	FileXdsClusterName     string
-	FileXdsServiceFQDN     string
-	FileXdsPort            int
+	GatewayClassName      string
+	EnvoyGatewayNamespace string
+	EnvoyEdsConfigMapName string
+	FileXdsClusterName    string
+	FileXdsServiceFQDN    string
+	FileXdsPort           int
 }
 
 type FileXdsDeploymentTemplate struct {
-	FileXdsDeploymentName     string
-	EnvoyGatewayNamespace     string
-	ExtensionServerImageRepo  string
-	ExtensionServerImageTag   string
-	ImagePullPolicy           string
-	FileXdsPort               int
-	FileXdsConfigPath         string
-	FileXdsConfigDir          string
+	FileXdsDeploymentName      string
+	EnvoyGatewayNamespace      string
+	ExtensionServerImageRepo   string
+	ExtensionServerImageTag    string
+	ImagePullPolicy            string
+	FileXdsPort                int
+	FileXdsConfigPath          string
+	FileXdsConfigDir           string
 	FileXdsServerConfigMapName string
 }
 
