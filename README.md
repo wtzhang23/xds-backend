@@ -1,7 +1,8 @@
 # xds-backend
 
 > [!CAUTION]
-> This is still WIP and has not been tested sufficiently in production yet!!!
+> This is still WIP and has not been tested sufficiently in production yet!!! 
+> Be warned for potential rapid schema changes during development.
 
 ## Overview
 

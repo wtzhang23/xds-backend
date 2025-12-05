@@ -4,13 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	pb "github.com/envoyproxy/gateway/proto/extension"
 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
+	tlsv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
+	"github.com/gogo/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/wtzhang23/xds-backend/pkg/types"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/types/known/anypb"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
@@ -91,6 +96,7 @@ func (s *Server) processBackendExtensionResource(ctx context.Context, cluster *c
 	}
 
 	s.changeXdsOfCluster(ctx, cluster, backendConfig)
+	s.configureTLSForCluster(ctx, cluster, backendConfig)
 	return nil
 }
 
@@ -134,19 +140,78 @@ func (s *Server) PostClusterModify(ctx context.Context, req *pb.PostClusterModif
 }
 
 func (s *Server) changeXdsOfCluster(ctx context.Context, cluster *clusterv3.Cluster, backendConfig types.XdsBackendConfig) {
-	s.log.DebugContext(ctx, "Configuring cluster to use EDS", slog.String("cluster", cluster.Name), slog.String("eds_service_name", backendConfig.EdsServiceName()))
-	hadTLS := cluster.TransportSocket != nil
-	if hadTLS {
-		s.log.DebugContext(ctx, "Cluster has TransportSocket before EDS configuration",
-			slog.String("cluster", cluster.Name))
-	}
-
+	edsSource := backendConfig.GetEndpointsSource()
 	cluster.ClusterDiscoveryType = &clusterv3.Cluster_Type{
 		Type: clusterv3.Cluster_EDS,
 	}
 	cluster.EdsClusterConfig = &clusterv3.Cluster_EdsClusterConfig{
-		ServiceName: backendConfig.EdsServiceName(),
-		EdsConfig:   backendConfig.GetConfigSource(),
+		ServiceName: edsSource.Name,
+		EdsConfig:   edsSource.ConfigSource,
 	}
-	s.log.DebugContext(ctx, "Cluster configured for EDS", slog.String("cluster", cluster.Name), slog.String("eds_service_name", backendConfig.EdsServiceName()))
+	s.log.DebugContext(ctx, "Cluster configured for EDS", slog.String("cluster", cluster.Name), slog.String("eds_service_name", edsSource.Name))
+}
+
+func (s *Server) configureTLSForCluster(ctx context.Context, cluster *clusterv3.Cluster, backendConfig types.XdsBackendConfig) {
+	tlsSettings := backendConfig.GetTlsSettings()
+	if tlsSettings == nil {
+		return
+	}
+
+	newUpstreamTlsContext := func() *tlsv3.UpstreamTlsContext {
+		if cluster.GetTransportSocket().GetName() != "envoy.transport_sockets.tls" {
+			s.log.DebugContext(ctx, "Replacing existing TransportSocket with TLS", slog.String("cluster", cluster.Name))
+			return nil
+		}
+		if cluster.TransportSocket.GetConfigType() == nil {
+			s.log.ErrorContext(ctx, "Missing TransportSocket config", slog.String("cluster", cluster.Name))
+			return nil
+		}
+		configType, ok := cluster.TransportSocket.GetConfigType().(*corev3.TransportSocket_TypedConfig)
+		if !ok {
+			s.log.ErrorContext(ctx, "Missing TypedConfig", slog.String("cluster", cluster.Name))
+			return nil
+		}
+		newTlsSettings := &tlsv3.UpstreamTlsContext{}
+		if err := proto.Unmarshal(configType.TypedConfig.Value, newTlsSettings); err != nil {
+			s.log.ErrorContext(ctx, "Failed to unmarshal TransportSocket", slog.String("error", err.Error()), slog.String("cluster", cluster.Name))
+			return nil
+		}
+		return newTlsSettings
+	}()
+	if newUpstreamTlsContext == nil {
+		newUpstreamTlsContext = &tlsv3.UpstreamTlsContext{}
+	}
+
+	// Merge TLS settings
+	if tlsSettings.Hostname != nil {
+		newUpstreamTlsContext.Sni = string(*tlsSettings.Hostname)
+	}
+	addedCertNames := make([]string, 0, len(tlsSettings.CaCertificates))
+	if len(tlsSettings.CaCertificates) > 0 {
+		if newUpstreamTlsContext.CommonTlsContext == nil {
+			newUpstreamTlsContext.CommonTlsContext = &tlsv3.CommonTlsContext{}
+		}
+		newUpstreamTlsContext.CommonTlsContext.TlsCertificates = nil
+
+		for _, caCertificate := range tlsSettings.CaCertificates {
+			newUpstreamTlsContext.CommonTlsContext.TlsCertificateSdsSecretConfigs = append(newUpstreamTlsContext.CommonTlsContext.TlsCertificateSdsSecretConfigs, &tlsv3.SdsSecretConfig{
+				Name: caCertificate.Name,
+			})
+			addedCertNames = append(addedCertNames, caCertificate.Name)
+		}
+	}
+
+	// Add new TLS settings to cluster
+	typedConfig, err := anypb.New(newUpstreamTlsContext)
+	if err != nil {
+		s.log.ErrorContext(ctx, "Failed to marshal TransportSocket", slog.String("error", err.Error()), slog.String("cluster", cluster.Name))
+		return
+	}
+	cluster.TransportSocket = &corev3.TransportSocket{
+		Name: "envoy.transport_sockets.tls",
+		ConfigType: &corev3.TransportSocket_TypedConfig{
+			TypedConfig: typedConfig,
+		},
+	}
+	s.log.DebugContext(ctx, "Cluster configured for TLS", slog.String("cluster", cluster.Name), slog.String("added_certs", strings.Join(addedCertNames, ", ")))
 }
