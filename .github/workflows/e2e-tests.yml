@@ -53,7 +53,7 @@ jobs:
             ${{ runner.os }}-helm-charts-
 
       - name: Run e2e tests
-        run: make test-e2e
+        run: make test-e2e RUN_EXPERIMENTAL=false
 
       - name: Upload test logs
         if: failure()

@@ -24,10 +24,12 @@ var (
 	extensionDeployer *ExtensionServerDeployer
 	testService       *TestServiceDeployer
 	envoyGatewayImage string
+	runExperimental   bool
 )
 
 func init() {
 	flag.StringVar(&envoyGatewayImage, "envoy-gateway-image", "", "Envoy Gateway Docker image (e.g., envoyproxy/gateway:v1.6.0 or envoyproxy/gateway:latest). If empty, uses the default from the Helm chart.")
+	flag.BoolVar(&runExperimental, "experimental", false, "Run experimental tests (e.g., BackendTLSPolicy test)")
 }
 
 func TestE2E(t *testing.T) {
@@ -184,12 +186,12 @@ var _ = BeforeSuite(func() {
 	defaultLogger.Log("Creating EnvoyProxy...")
 	fileXdsServiceFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", FileXdsServiceName, EnvoyGatewayNamespace)
 	err = applyTemplate(ctx, k8sClient, "envoyproxy.yaml", EnvoyProxyTemplate{
-		GatewayClassName:       GatewayClassName,
-		EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
-		EnvoyEdsConfigMapName:  EnvoyEdsConfigMapName,
-		FileXdsClusterName:     FileXdsClusterName,
-		FileXdsServiceFQDN:     fileXdsServiceFQDN,
-		FileXdsPort:            FileXdsPort,
+		GatewayClassName:      GatewayClassName,
+		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
+		EnvoyEdsConfigMapName: EnvoyEdsConfigMapName,
+		FileXdsClusterName:    FileXdsClusterName,
+		FileXdsServiceFQDN:    fileXdsServiceFQDN,
+		FileXdsPort:           FileXdsPort,
 	})
 	if err != nil {
 		defaultLogger.Logf("Warning: Failed to create EnvoyProxy (may already exist): %v", err)
@@ -222,14 +224,14 @@ var _ = BeforeSuite(func() {
 	Expect(cluster.LoadImage(ctx, image)).To(Succeed())
 
 	Expect(applyTemplate(ctx, k8sClient, "filexds-deployment.yaml", FileXdsDeploymentTemplate{
-		FileXdsDeploymentName:     FileXdsDeploymentName,
-		EnvoyGatewayNamespace:     EnvoyGatewayNamespace,
-		ExtensionServerImageRepo:  ExtensionServerImageRepo,
-		ExtensionServerImageTag:   ExtensionServerImageTag,
-		ImagePullPolicy:           ImagePullPolicy,
-		FileXdsPort:               FileXdsPort,
-		FileXdsConfigPath:         FileXdsConfigPath,
-		FileXdsConfigDir:          FileXdsConfigDir,
+		FileXdsDeploymentName:      FileXdsDeploymentName,
+		EnvoyGatewayNamespace:      EnvoyGatewayNamespace,
+		ExtensionServerImageRepo:   ExtensionServerImageRepo,
+		ExtensionServerImageTag:    ExtensionServerImageTag,
+		ImagePullPolicy:            ImagePullPolicy,
+		FileXdsPort:                FileXdsPort,
+		FileXdsConfigPath:          FileXdsConfigPath,
+		FileXdsConfigDir:           FileXdsConfigDir,
 		FileXdsServerConfigMapName: FileXdsServerConfigMapName,
 	})).To(Succeed())
 

@@ -460,6 +460,10 @@ var _ = Describe("xDS Backend Integration", func() {
 	})
 
 	It("should support BackendTLSPolicy for xDS backend", func() {
+		if !runExperimental {
+			Skip("Skipping experimental test (use -experimental flag to enable)")
+		}
+
 		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
 
