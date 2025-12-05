@@ -6,7 +6,7 @@ import (
 
 	"github.com/urfave/cli"
 	"github.com/wtzhang23/xds-backend/internal/extserver"
-	"github.com/wtzhang23/xds-backend/internal/fileeds"
+	"github.com/wtzhang23/xds-backend/internal/filexds"
 	"github.com/wtzhang23/xds-backend/internal/tlsconfig"
 )
 
@@ -87,8 +87,8 @@ func main() {
 				},
 			},
 			{
-				Name:  "fileeds",
-				Usage: "runs the File EDS server",
+				Name:  "filexds",
+				Usage: "runs the File xDS server",
 				Action: func(ctx *cli.Context) error {
 					var level slog.Level
 					if err := level.UnmarshalText([]byte(ctx.String("log-level"))); err != nil {
@@ -104,7 +104,7 @@ func main() {
 							KeyFile:  ctx.String("tls-key-file"),
 						}
 					}
-					return fileeds.StartEdsServer(
+					return filexds.StartXdsServer(
 						ctx.String("host"),
 						ctx.Int("grpc-port"),
 						ctx.String("file-path"),
@@ -131,7 +131,7 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "id",
-						Usage: "the id of the EDS server",
+						Usage: "the id of the xDS server",
 						Value: "",
 					},
 					&cli.StringFlag{

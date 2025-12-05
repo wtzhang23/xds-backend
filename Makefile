@@ -13,7 +13,11 @@ docker-build:
 	docker build -t $(IMAGE_REPO):$(IMAGE_TAG) .
 
 .PHONY: generate
-generate: generate-proto generate-controller-gen
+generate: generate-go generate-proto generate-controller-gen
+
+.PHONY: generate-go
+generate-go:
+	go generate ./...
 
 .PHONY: generate-proto
 generate-proto:
