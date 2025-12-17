@@ -71,8 +71,14 @@ type XdsBackendFileXdsTemplate struct {
 	EnvoyGatewayNamespace  string
 	FileXdsClusterName     string
 	TestServiceName        string
+	// TLS configuration (optional)
+	TlsEnabled    bool   // Set to true to enable TLS section. If true but no TLS fields provided, outputs empty TLS config (tls: {})
+	TlsCaCertName string // Optional: CA certificate name for TLS
+	TlsCaCertEmpty bool  // Set to true to output empty caCertificates block (caCertificates: {})
+	TlsHostname   string // Optional: Hostname for TLS
 }
 
+// XdsBackendInlineTLSTemplate is deprecated, use XdsBackendFileXdsTemplate with TlsEnabled=true
 type XdsBackendInlineTLSTemplate struct {
 	XdsBackendGroup        string
 	XdsBackendAPIVersion   string
@@ -83,6 +89,17 @@ type XdsBackendInlineTLSTemplate struct {
 	TestServiceName        string
 	TlsCaCertName          string
 	TlsHostname            string
+}
+
+// XdsBackendInsecureTLSTemplate is deprecated, use XdsBackendFileXdsTemplate with TlsEnabled=true (and no TlsCaCertName/TlsHostname for empty config)
+type XdsBackendInsecureTLSTemplate struct {
+	XdsBackendGroup        string
+	XdsBackendAPIVersion   string
+	XdsBackendKind         string
+	XdsBackendResourceName string
+	EnvoyGatewayNamespace  string
+	FileXdsClusterName     string
+	TestServiceName        string
 }
 
 type FileXdsConfigMapTemplate struct {

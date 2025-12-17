@@ -9,4 +9,22 @@ spec:
       server: {{ .FileXdsClusterName }}
     apiType: GRPC
     name: {{ .TestServiceName }}
+{{- if .TlsEnabled }}
+  tls:
+{{- if .TlsCaCertEmpty }}
+    caCertificates: {}
+{{- else if .TlsCaCertName }}
+    caCertificates:
+      server:
+        server: {{ .FileXdsClusterName }}
+      apiType: GRPC
+      name: {{ .TlsCaCertName }}
+{{- end }}
+{{- if .TlsHostname }}
+    hostname: "{{ .TlsHostname }}"
+{{- end }}
+{{- if and (not .TlsCaCertName) (not .TlsCaCertEmpty) (not .TlsHostname) }}
+    {}
+{{- end }}
+{{- end }}
 
