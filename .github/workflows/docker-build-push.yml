@@ -75,7 +75,9 @@ jobs:
           push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ github.ref_name }}-${{ matrix.platform }}
+          cache-from: |
+            type=gha,scope=main-${{ matrix.platform }}
+            type=gha,scope=${{ github.ref_name }}-${{ matrix.platform }}
           cache-to: type=gha,mode=max,scope=${{ github.ref_name }}-${{ matrix.platform }}
 
       - name: Output image info
