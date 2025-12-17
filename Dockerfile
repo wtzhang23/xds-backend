@@ -6,7 +6,10 @@ WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
 
-COPY . ./
+COPY ./api ./api
+COPY ./internal ./internal
+COPY ./pkg ./pkg
+COPY ./cmd ./cmd
 RUN CGO_ENABLED=0  \
     GOOS=${TARGETOS} \
     GOARCH=${TARGETARCH} \
