@@ -24,20 +24,15 @@ type ExtensionServerDeployer struct {
 }
 
 // NewExtensionServerDeployer creates a new ExtensionServerDeployer
-func NewExtensionServerDeployer(kubeconfig string) (*ExtensionServerDeployer, error) {
-	k8sClient, err := NewK8sClient(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-
+func NewExtensionServerDeployer(k8sClient *K8sClient) *ExtensionServerDeployer {
 	settings := cli.New()
-	settings.KubeConfig = kubeconfig
+	settings.KubeConfig = k8sClient.GetKubeconfigPath()
 
 	return &ExtensionServerDeployer{
 		k8sClient: k8sClient,
 		settings:  settings,
 		logger:    defaultLogger,
-	}, nil
+	}
 }
 
 // SetLogger sets a custom logger for the deployer

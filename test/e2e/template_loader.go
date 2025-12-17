@@ -32,14 +32,25 @@ type GatewayTemplate struct {
 	GatewayListenerPort   int
 }
 
+type BackendRef struct {
+	Group     string
+	Kind      string
+	Name      string
+	Namespace string
+	Weight    int
+}
+
 type HTTPRouteTemplate struct {
-	HTTPRouteName          string
-	GatewayName            string
-	EnvoyGatewayNamespace  string
+	HTTPRouteName         string
+	GatewayName           string
+	EnvoyGatewayNamespace string
+	HTTPRoutePathPrefix   string
+	// For single backendRef
 	XdsBackendGroup        string
 	XdsBackendKind         string
 	XdsBackendResourceName string
-	HTTPRoutePathPrefix    string
+	// For multiple backendRefs
+	BackendRefs []BackendRef
 }
 
 type XdsBackendTemplate struct {
@@ -88,12 +99,15 @@ type FileXdsConfigMapTemplate struct {
 type FileXdsServerConfigMapTemplate struct {
 	FileXdsServerConfigMapName string
 	EnvoyGatewayNamespace      string
-	TestServiceName            string
-	TestServiceIP              string
-	TestServicePort            int
-	TestServiceTLSPort         int
+	Services                   []ServiceEndpoint
 	TlsCaCertPEM               string
 	TlsCaCertName              string
+}
+
+type ServiceEndpoint struct {
+	ServiceName string
+	ServiceIP   string
+	ServicePort int
 }
 
 type EnvoyEdsConfigMapTemplate struct {
@@ -161,6 +175,7 @@ type TestServiceDeploymentTemplate struct {
 	TestServicePort          int
 	TestServiceTLSSecretName string
 	TestServiceTLSPort       int
+	TestServiceResponse      string
 }
 
 type ExtensionServerValuesTemplate struct {
@@ -282,7 +297,12 @@ func writeRenderedHelmValues(templatePath string, values map[string]interface{})
 	_, callerFile, _, _ := runtime.Caller(0)
 	baseDir := filepath.Dir(callerFile)
 
-	outputPath, err := getRenderedConfigPath(templatePath, ".yaml", baseDir)
+	// Don't add .yaml extension if template path already has it
+	extension := ""
+	if !strings.HasSuffix(templatePath, ".yaml") && !strings.HasSuffix(templatePath, ".yml") {
+		extension = ".yaml"
+	}
+	outputPath, err := getRenderedConfigPath(templatePath, extension, baseDir)
 	if err != nil {
 		return err
 	}

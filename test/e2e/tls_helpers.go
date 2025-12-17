@@ -19,52 +19,88 @@ import (
 
 // GenerateSelfSignedCert generates a self-signed TLS certificate and key
 // Returns the certificate and key as PEM-encoded bytes
-func GenerateSelfSignedCert(commonName string) ([]byte, []byte, error) {
-	// Generate private key
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+// For test purposes, this generates a CA certificate and a server certificate signed by it
+// The CA certificate is returned as the first value (for use in validation contexts)
+// The server certificate is returned as the second value (for use as the server cert)
+func GenerateSelfSignedCert(commonName string) (caCertPEM []byte, serverCertPEM []byte, serverKeyPEM []byte, err error) {
+	// Generate CA private key
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to generate private key: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to generate CA private key: %w", err)
 	}
 
-	// Create certificate template
-	template := x509.Certificate{
+	// Create CA certificate template
+	caTemplate := x509.Certificate{
 		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: fmt.Sprintf("%s CA", commonName),
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+
+	// Create CA certificate (self-signed)
+	caCertDER, err := x509.CreateCertificate(rand.Reader, &caTemplate, &caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to create CA certificate: %w", err)
+	}
+
+	caCertPEM = pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: caCertDER,
+	})
+
+	// Generate server private key
+	serverKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to generate server private key: %w", err)
+	}
+
+	// Parse CA certificate for signing
+	caCert, err := x509.ParseCertificate(caCertDER)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("failed to parse CA certificate: %w", err)
+	}
+
+	// Create server certificate template
+	serverTemplate := x509.Certificate{
+		SerialNumber: big.NewInt(2),
 		Subject: pkix.Name{
 			CommonName: commonName,
 		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		// Add localhost to DNS names for port-forwarding in e2e tests
-		DNSNames: []string{commonName, "localhost", "127.0.0.1"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(365 * 24 * time.Hour),
+		KeyUsage:     x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{commonName, "localhost", "127.0.0.1"},
+		IsCA:         false,
 	}
 
-	// Create certificate
-	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	// Create server certificate signed by CA
+	serverCertDER, err := x509.CreateCertificate(rand.Reader, &serverTemplate, caCert, &serverKey.PublicKey, caKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create certificate: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to create server certificate: %w", err)
 	}
 
-	// Encode certificate to PEM
-	certPEM := pem.EncodeToMemory(&pem.Block{
+	serverCertPEM = pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
-		Bytes: certDER,
+		Bytes: serverCertDER,
 	})
 
-	// Encode private key to PEM
-	keyPEM := pem.EncodeToMemory(&pem.Block{
+	serverKeyPEM = pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+		Bytes: x509.MarshalPKCS1PrivateKey(serverKey),
 	})
 
-	return certPEM, keyPEM, nil
+	return caCertPEM, serverCertPEM, serverKeyPEM, nil
 }
 
 // CreateTLSSecret creates a Kubernetes secret with TLS certificate and key
 func CreateTLSSecret(ctx context.Context, k8sClient *K8sClient, namespace, secretName, commonName string) error {
-	certPEM, keyPEM, err := GenerateSelfSignedCert(commonName)
+	_, serverCertPEM, serverKeyPEM, err := GenerateSelfSignedCert(commonName)
 	if err != nil {
 		return fmt.Errorf("failed to generate certificate: %w", err)
 	}
@@ -76,8 +112,8 @@ func CreateTLSSecret(ctx context.Context, k8sClient *K8sClient, namespace, secre
 		},
 		Type: corev1.SecretTypeTLS,
 		Data: map[string][]byte{
-			"tls.crt": certPEM,
-			"tls.key": keyPEM,
+			"tls.crt": serverCertPEM,
+			"tls.key": serverKeyPEM,
 		},
 	}
 

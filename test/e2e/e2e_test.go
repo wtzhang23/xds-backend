@@ -23,8 +23,10 @@ var (
 	egInstaller       *EnvoyGatewayInstaller
 	extensionDeployer *ExtensionServerDeployer
 	testService       *TestServiceDeployer
+	testService2      *TestServiceDeployer
 	envoyGatewayImage string
 	runExperimental   bool
+	testServiceCACert []byte // CA certificate used for test service TLS (set by setupTestServiceTLSSecret)
 )
 
 func init() {
@@ -38,82 +40,26 @@ func TestE2E(t *testing.T) {
 }
 
 var _ = BeforeSuite(func() {
-	defaultLogger.Log("=== E2E Test Suite Starting ===")
-
 	if os.Getenv("SKIP_E2E") == "true" {
-		defaultLogger.Log("SKIP_E2E environment variable is set, skipping e2e tests")
 		Skip("Skipping e2e tests")
 	}
 
 	ctx, cancel = context.WithTimeout(context.Background(), TestTimeout)
 
-	By("Setting up kind cluster")
-	defaultLogger.Logf("Creating kind cluster: %s", ClusterName)
-	var err error
-	cluster, err = NewKindCluster(ClusterName)
-	Expect(err).NotTo(HaveOccurred())
-	Expect(cluster.Create(ctx)).To(Succeed())
-	defaultLogger.Logf("✓ Kind cluster created: %s", ClusterName)
-
-	defaultLogger.Log("Waiting for kind cluster to be ready...")
-	Expect(cluster.WaitForReady(ctx)).To(Succeed())
-	defaultLogger.Log("✓ Kind cluster is ready")
-
-	// Preload images into kind if needed
-	By("Preloading Docker images into kind cluster")
-	// Always preload the extension server image (typically a local build)
-	extensionImage := fmt.Sprintf("%s:%s", ExtensionServerImageRepo, ExtensionServerImageTag)
-	defaultLogger.Logf("Preloading extension server image into kind: %s", extensionImage)
-	Expect(cluster.LoadImage(ctx, extensionImage)).To(Succeed())
-
-	// Optionally preload a custom Envoy Gateway image if provided
-	if strings.TrimSpace(envoyGatewayImage) != "" {
-		defaultLogger.Logf("Preloading Envoy Gateway image into kind: %s", envoyGatewayImage)
-		Expect(cluster.LoadImage(ctx, envoyGatewayImage)).To(Succeed())
-	}
+	setupKindCluster(ctx)
+	preloadImages(ctx)
 
 	kubeconfigPath := cluster.GetKubeconfigPath()
-	defaultLogger.Logf("Kubeconfig: %s", kubeconfigPath)
-	defaultLogger.Logf("Deploying test HTTP service %s in namespace %s...", TestServiceName, TestNamespace)
-	testService, err = NewTestServiceDeployer(cluster.GetKubeconfigPath())
+	k8sClient, err := NewK8sClient(kubeconfigPath)
 	Expect(err).NotTo(HaveOccurred())
 
-	k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
-	Expect(err).NotTo(HaveOccurred())
-	Expect(k8sClient.CreateNamespace(ctx, TestNamespace)).To(Succeed())
-
-	backendFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", TestServiceName, TestNamespace)
-	backendCertPEM, backendKeyPEM, err := GenerateSelfSignedCert(backendFQDN)
-	Expect(err).NotTo(HaveOccurred())
-
-	// Delete existing secret to avoid conflicts during re-runs
-	err = k8sClient.DeleteSecret(ctx, TestNamespace, TestServiceTLSSecretName)
-	if err != nil && !errors.IsNotFound(err) {
-		Expect(err).NotTo(HaveOccurred(), "Failed to delete existing TLS secret")
-	}
-
-	certBase64 := base64.StdEncoding.EncodeToString(backendCertPEM)
-	keyBase64 := base64.StdEncoding.EncodeToString(backendKeyPEM)
-
-	Expect(applyTemplate(ctx, k8sClient, "test-service-tls-secret.yaml", TestServiceTLSSecretTemplate{
-		TestServiceTLSSecretName: TestServiceTLSSecretName,
-		TestNamespace:            TestNamespace,
-		TestServiceTLSCertBase64: certBase64,
-		TestServiceTLSKeyBase64:  keyBase64,
-	})).To(Succeed())
-
-	Expect(testService.DeployWithTLS(ctx, TestNamespace, TestServiceName, TestServicePort, TestServiceTLSSecretName, TestServiceTLSPort)).To(Succeed())
-	defaultLogger.Log("Test service deployed, waiting for ready...")
-	Expect(testService.WaitForReady(ctx, TestNamespace, TestServiceName)).To(Succeed())
-	defaultLogger.Log("✓ Test service is ready")
+	setupTestServiceTLSSecret(ctx, k8sClient)
+	setupTestService(ctx, k8sClient)
 
 	By("Deploying extension server")
-	defaultLogger.Logf("Deploying extension server in namespace: %s", ExtensionServerNamespace)
 	Expect(k8sClient.CreateNamespace(ctx, ExtensionServerNamespace)).To(Succeed())
 
-	extensionDeployer, err = NewExtensionServerDeployer(cluster.GetKubeconfigPath())
-	Expect(err).NotTo(HaveOccurred())
-	defaultLogger.Log("✓ Extension server deployer created")
+	extensionDeployer = NewExtensionServerDeployer(k8sClient)
 
 	tlsSecretName := "xds-backend-tls"
 	extensionServerFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", ExtensionServerReleaseName, ExtensionServerNamespace)
@@ -121,59 +67,137 @@ var _ = BeforeSuite(func() {
 
 	extensionDeployer.SetCluster(cluster)
 	Expect(extensionDeployer.DeployWithTLS(ctx, ExtensionServerNamespace, true, true, ExtensionServerTLSPort, tlsSecretName)).To(Succeed())
-	defaultLogger.Log("✓ Extension server deployed")
-
-	defaultLogger.Log("Waiting for extension server pods to be ready...")
 	Expect(extensionDeployer.WaitForReady(ctx, ExtensionServerNamespace)).To(Succeed())
-	defaultLogger.Log("✓ Extension server is ready")
 
+	setupEnvoyGateway(ctx, k8sClient)
+	waitForCRDs(ctx, k8sClient)
+
+	setupAdditionalTestService(ctx, k8sClient)
+	setupFilexdsConfigMaps(ctx, k8sClient)
+	setupGatewayResources(ctx, k8sClient)
+	setupFilexdsServer(ctx, k8sClient)
+})
+
+func setupKindCluster(ctx context.Context) {
+	By("Setting up kind cluster")
+	defaultLogger.Logf("Creating kind cluster: %s", ClusterName)
+	var err error
+	cluster, err = NewKindCluster(ClusterName)
+	Expect(err).NotTo(HaveOccurred())
+	Expect(cluster.Create(ctx)).To(Succeed())
+	Expect(cluster.WaitForReady(ctx)).To(Succeed())
+	defaultLogger.Logf("Kind cluster %s is ready", ClusterName)
+}
+
+func preloadImages(ctx context.Context) {
+	By("Preloading Docker images into kind cluster")
+	extensionImage := fmt.Sprintf("%s:%s", ExtensionServerImageRepo, ExtensionServerImageTag)
+	Expect(cluster.LoadImage(ctx, extensionImage)).To(Succeed())
+
+	if strings.TrimSpace(envoyGatewayImage) != "" {
+		Expect(cluster.LoadImage(ctx, envoyGatewayImage)).To(Succeed())
+	}
+}
+
+func setupTestServiceTLSSecret(ctx context.Context, k8sClient *K8sClient) {
+	defaultLogger.Log("Creating test service TLS secret")
+	Expect(k8sClient.CreateNamespace(ctx, TestNamespace)).To(Succeed())
+
+	backendFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", TestServiceName, TestNamespace)
+	caCertPEM, serverCertPEM, serverKeyPEM, err := GenerateSelfSignedCert(backendFQDN)
+	Expect(err).NotTo(HaveOccurred())
+	testServiceCACert = caCertPEM
+
+	err = k8sClient.DeleteSecret(ctx, TestNamespace, TestServiceTLSSecretName)
+	if err != nil && !errors.IsNotFound(err) {
+		Expect(err).NotTo(HaveOccurred(), "Failed to delete existing TLS secret")
+	}
+
+	certBase64 := base64.StdEncoding.EncodeToString(serverCertPEM)
+	keyBase64 := base64.StdEncoding.EncodeToString(serverKeyPEM)
+
+	Expect(applyTemplate(ctx, k8sClient, "test-service-tls-secret.yaml", TestServiceTLSSecretTemplate{
+		TestServiceTLSSecretName: TestServiceTLSSecretName,
+		TestNamespace:            TestNamespace,
+		TestServiceTLSCertBase64: certBase64,
+		TestServiceTLSKeyBase64:  keyBase64,
+	})).To(Succeed())
+	defaultLogger.Log("Test service TLS secret created")
+}
+
+func setupTestService(ctx context.Context, k8sClient *K8sClient) {
+	defaultLogger.Logf("Deploying test service %s", TestServiceName)
+	testService = NewTestServiceDeployer(k8sClient)
+
+	Expect(testService.DeployWithTLS(ctx, TestNamespace, TestServiceName, TestServicePort, TestServiceTLSSecretName, TestServiceTLSPort)).To(Succeed())
+	Expect(testService.WaitForReady(ctx, TestNamespace, TestServiceName)).To(Succeed())
+	defaultLogger.Logf("Test service %s is ready", TestServiceName)
+}
+
+func setupEnvoyGateway(ctx context.Context, k8sClient *K8sClient) {
 	By("Installing Envoy Gateway")
 	defaultLogger.Logf("Installing Envoy Gateway in namespace: %s", EnvoyGatewayNamespace)
-	egInstaller, err = NewEnvoyGatewayInstaller(cluster.GetKubeconfigPath())
+	var err error
+	egInstaller, err = NewEnvoyGatewayInstaller(k8sClient)
 	Expect(err).NotTo(HaveOccurred())
-	defaultLogger.Log("✓ Envoy Gateway installer created")
 
-	defaultLogger.Logf("Configuring Envoy Gateway with extension server at %s:%d", extensionServerFQDN, ExtensionServerPort)
-
+	extensionServerFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", ExtensionServerReleaseName, ExtensionServerNamespace)
 	Expect(egInstaller.Install(ctx, extensionServerFQDN, ExtensionServerPort, envoyGatewayImage)).To(Succeed())
-	defaultLogger.Log("✓ Envoy Gateway Helm chart installed")
-
-	defaultLogger.Log("Waiting for Envoy Gateway pods to be ready...")
 	Expect(egInstaller.WaitForReady(ctx, EnvoyGatewayNamespace)).To(Succeed())
-	defaultLogger.Log("✓ Envoy Gateway is ready")
+	defaultLogger.Log("Envoy Gateway is ready")
+}
 
-	defaultLogger.Log("Waiting for CRDs to be available...")
-	k8sClient, err = NewK8sClient(cluster.GetKubeconfigPath())
-	Expect(err).NotTo(HaveOccurred())
+func waitForCRDs(ctx context.Context, k8sClient *K8sClient) {
 	Expect(k8sClient.WaitForCRD(ctx, "gateways.gateway.networking.k8s.io")).To(Succeed())
 	Expect(k8sClient.WaitForCRD(ctx, "httproutes.gateway.networking.k8s.io")).To(Succeed())
 	Expect(k8sClient.WaitForCRD(ctx, "gatewayclasses.gateway.networking.k8s.io")).To(Succeed())
 	Expect(k8sClient.WaitForCRD(ctx, "xdsbackends.xdsbackend.wtzhang23.github.io")).To(Succeed())
 	Expect(k8sClient.WaitForCRD(ctx, "envoyproxies.gateway.envoyproxy.io")).To(Succeed())
 	Expect(k8sClient.WaitForCRD(ctx, "backendtlspolicies.gateway.networking.k8s.io")).To(Succeed())
-	defaultLogger.Log("✓ Common CRDs are available")
 
-	defaultLogger.Log("Creating filexds server and Envoy ConfigMaps...")
+	Expect(k8sClient.RefreshRESTMapper(ctx)).To(Succeed())
+	time.Sleep(2 * time.Second)
+}
+
+func setupFilexdsConfigMaps(ctx context.Context, k8sClient *K8sClient) {
+	defaultLogger.Log("Creating filexds server and Envoy ConfigMaps")
 	testServiceIP, err := testService.GetServiceClusterIP(ctx, TestNamespace, TestServiceName)
 	Expect(err).NotTo(HaveOccurred())
 
-	// Get the TLS certificate from the test service secret to include in the ConfigMaps
-	// Note: backendCertPEM is already available from earlier in BeforeSuite
-	caCertPEM := string(backendCertPEM)
+	Expect(testServiceCACert).NotTo(BeNil(), "testServiceCACert not set - setupTestServiceTLSSecret must be called before setupFilexdsConfigMaps")
+	caCertPEM := string(testServiceCACert)
 
-	// Create filexds server ConfigMap (for the filexds server to serve xDS resources)
+	services := []ServiceEndpoint{
+		{
+			ServiceName: TestServiceName,
+			ServiceIP:   testServiceIP,
+			ServicePort: TestServicePort,
+		},
+		{
+			ServiceName: TestServiceName + "-tls",
+			ServiceIP:   testServiceIP,
+			ServicePort: TestServiceTLSPort,
+		},
+	}
+
+	if testService2 != nil {
+		service2IP, err := testService2.GetServiceClusterIP(ctx, TestNamespace, TestService2Name)
+		Expect(err).NotTo(HaveOccurred())
+		services = append(services, ServiceEndpoint{
+			ServiceName: TestService2Name,
+			ServiceIP:   service2IP,
+			ServicePort: TestService2Port,
+		})
+	}
+
 	Expect(applyTemplate(ctx, k8sClient, "filexds-server-configmap.yaml", FileXdsServerConfigMapTemplate{
 		FileXdsServerConfigMapName: FileXdsServerConfigMapName,
 		EnvoyGatewayNamespace:      EnvoyGatewayNamespace,
-		TestServiceName:            TestServiceName,
-		TestServiceIP:              testServiceIP,
-		TestServicePort:            TestServicePort,
-		TestServiceTLSPort:         TestServiceTLSPort,
+		Services:                   services,
 		TlsCaCertPEM:               caCertPEM,
 		TlsCaCertName:              InlineTLSCACertResourceName,
 	})).To(Succeed())
 
-	// Create Envoy EDS ConfigMap (for Envoy's file-based EDS)
 	Expect(applyTemplate(ctx, k8sClient, "envoy-eds-configmap.yaml", EnvoyEdsConfigMapTemplate{
 		EnvoyEdsConfigMapName: EnvoyEdsConfigMapName,
 		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
@@ -181,11 +205,13 @@ var _ = BeforeSuite(func() {
 		TestServiceIP:         testServiceIP,
 		TestServicePort:       TestServicePort,
 	})).To(Succeed())
-	defaultLogger.Log("✓ Filexds server and Envoy ConfigMaps created")
+	defaultLogger.Log("Filexds server and Envoy ConfigMaps created")
+}
 
-	defaultLogger.Log("Creating EnvoyProxy...")
+func setupGatewayResources(ctx context.Context, k8sClient *K8sClient) {
+	defaultLogger.Log("Creating Gateway resources")
 	fileXdsServiceFQDN := fmt.Sprintf("%s.%s.svc.cluster.local", FileXdsServiceName, EnvoyGatewayNamespace)
-	err = applyTemplate(ctx, k8sClient, "envoyproxy.yaml", EnvoyProxyTemplate{
+	err := applyTemplate(ctx, k8sClient, "envoyproxy.yaml", EnvoyProxyTemplate{
 		GatewayClassName:      GatewayClassName,
 		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
 		EnvoyEdsConfigMapName: EnvoyEdsConfigMapName,
@@ -193,20 +219,15 @@ var _ = BeforeSuite(func() {
 		FileXdsServiceFQDN:    fileXdsServiceFQDN,
 		FileXdsPort:           FileXdsPort,
 	})
-	if err != nil {
-		defaultLogger.Logf("Warning: Failed to create EnvoyProxy (may already exist): %v", err)
-	} else {
+	if err == nil {
 		time.Sleep(EnvoyProxyProcessingDelay)
 	}
 
-	defaultLogger.Log("Creating/updating GatewayClass...")
 	Expect(applyTemplate(ctx, k8sClient, "gatewayclass.yaml", GatewayClassTemplate{
 		GatewayClassName:      GatewayClassName,
 		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
 	})).To(Succeed())
-	defaultLogger.Log("✓ EnvoyProxy and GatewayClass configured")
 
-	defaultLogger.Log("Creating Gateway...")
 	Expect(applyTemplate(ctx, k8sClient, "gateway.yaml", GatewayTemplate{
 		GatewayName:           GatewayName,
 		EnvoyGatewayNamespace: EnvoyGatewayNamespace,
@@ -215,11 +236,11 @@ var _ = BeforeSuite(func() {
 		GatewayListenerPort:   GatewayListenerPort,
 	})).To(Succeed())
 	Expect(k8sClient.WaitForGatewayReady(ctx, EnvoyGatewayNamespace, GatewayName, DeploymentTimeout)).To(Succeed())
-	defaultLogger.Log("✓ Gateway created and ready")
+	defaultLogger.Log("Gateway resources created")
+}
 
-	defaultLogger.Log("Deploying filexds server...")
-	// testServiceIP already obtained above when creating the ConfigMap
-
+func setupFilexdsServer(ctx context.Context, k8sClient *K8sClient) {
+	defaultLogger.Log("Deploying filexds server")
 	image := fmt.Sprintf("%s:%s", ExtensionServerImageRepo, ExtensionServerImageTag)
 	Expect(cluster.LoadImage(ctx, image)).To(Succeed())
 
@@ -243,29 +264,27 @@ var _ = BeforeSuite(func() {
 	})).To(Succeed())
 
 	Expect(k8sClient.WaitForPodsReady(ctx, EnvoyGatewayNamespace, fmt.Sprintf("app=%s", FileXdsDeploymentName), DeploymentTimeout)).To(Succeed())
-	defaultLogger.Log("✓ Filexds server deployed and ready")
+	defaultLogger.Log("Filexds server deployed and ready")
+}
 
-	defaultLogger.Log("=== E2E Test Suite Setup Complete ===")
-})
+func setupAdditionalTestService(ctx context.Context, k8sClient *K8sClient) {
+	defaultLogger.Logf("Deploying additional test service %s", TestService2Name)
+	testService2 = NewTestServiceDeployer(k8sClient)
+
+	Expect(testService2.DeployWithTLS(ctx, TestNamespace, TestService2Name, TestService2Port, "", 0)).To(Succeed())
+	Expect(testService2.WaitForReady(ctx, TestNamespace, TestService2Name)).To(Succeed())
+	defaultLogger.Logf("Test service %s is ready", TestService2Name)
+}
 
 var _ = AfterSuite(func() {
-	defaultLogger.Log("\n=== E2E Test Suite Cleanup ===")
-
 	if cancel != nil {
 		cancel()
 	}
 
 	if cluster != nil {
 		By("Cleaning up kind cluster")
-		defaultLogger.Logf("Deleting kind cluster: %s", ClusterName)
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), CleanupTimeout)
 		defer cleanupCancel()
-		if err := cluster.Delete(cleanupCtx); err != nil {
-			defaultLogger.Logf("Warning: Failed to delete cluster: %v", err)
-		} else {
-			defaultLogger.Logf("✓ Kind cluster deleted: %s", ClusterName)
-		}
+		_ = cluster.Delete(cleanupCtx)
 	}
-
-	defaultLogger.Log("=== E2E Test Suite Cleanup Complete ===")
 })

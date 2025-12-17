@@ -13,14 +13,10 @@ type TestServiceDeployer struct {
 }
 
 // NewTestServiceDeployer creates a new test service deployer
-func NewTestServiceDeployer(kubeconfig string) (*TestServiceDeployer, error) {
-	k8sClient, err := NewK8sClient(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
+func NewTestServiceDeployer(k8sClient *K8sClient) *TestServiceDeployer {
 	return &TestServiceDeployer{
 		k8sClient: k8sClient,
-	}, nil
+	}
 }
 
 // Deploy deploys a test HTTP service with optional TLS support
@@ -36,12 +32,17 @@ func (d *TestServiceDeployer) DeployWithTLS(ctx context.Context, namespace, name
 	}
 
 	// Load deployment template
+	responseMessage := "Hello from test service"
+	if name == TestService2Name {
+		responseMessage = "Response from service 2"
+	}
 	templateData := TestServiceDeploymentTemplate{
-		TestServiceName:       name,
-		TestNamespace:         namespace,
-		TestServicePort:       port,
+		TestServiceName:          name,
+		TestNamespace:            namespace,
+		TestServicePort:          port,
 		TestServiceTLSSecretName: tlsSecretName,
-		TestServiceTLSPort:     tlsPort,
+		TestServiceTLSPort:       tlsPort,
+		TestServiceResponse:      responseMessage,
 	}
 	deploymentTemplatePath := "test-service-deployment.yaml"
 	deploymentYaml, err := LoadTemplate(deploymentTemplatePath, templateData)

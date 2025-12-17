@@ -36,6 +36,7 @@ type K8sClient struct {
 	gatewayClient gatewayclient.Interface
 	config        *rest.Config
 	mapper        meta.RESTMapper
+	kubeconfigPath string
 	logger        testLogger
 }
 
@@ -72,8 +73,14 @@ func NewK8sClient(kubeconfigPath string) (*K8sClient, error) {
 		gatewayClient: gatewayClient,
 		config:        config,
 		mapper:        mapper,
+		kubeconfigPath: kubeconfigPath,
 		logger:        defaultLogger,
 	}, nil
+}
+
+// GetKubeconfigPath returns the kubeconfig path used by this client
+func (k *K8sClient) GetKubeconfigPath() string {
+	return k.kubeconfigPath
 }
 
 // SetLogger sets a custom logger for the client
@@ -249,6 +256,16 @@ func (k *K8sClient) getResourceClient(gvk *schema.GroupVersionKind, namespace st
 	}
 	// Namespaced resource
 	return baseClient.Namespace(namespace), nil
+}
+
+// RefreshRESTMapper refreshes the REST mapper cache to discover newly installed CRDs
+func (k *K8sClient) RefreshRESTMapper(ctx context.Context) error {
+	discoveryClient := k.clientset.Discovery()
+	cachedDiscoveryClient := memory.NewMemCacheClient(discoveryClient)
+	k.mapper = restmapper.NewDeferredDiscoveryRESTMapper(cachedDiscoveryClient)
+	// Force a refresh by invalidating the cache
+	cachedDiscoveryClient.Invalidate()
+	return nil
 }
 
 // WaitForCRD waits for a CRD to be installed and established

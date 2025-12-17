@@ -49,12 +49,7 @@ type EnvoyGatewayInstaller struct {
 }
 
 // NewEnvoyGatewayInstaller creates a new EnvoyGatewayInstaller
-func NewEnvoyGatewayInstaller(kubeconfig string) (*EnvoyGatewayInstaller, error) {
-	k8sClient, err := NewK8sClient(kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-
+func NewEnvoyGatewayInstaller(k8sClient *K8sClient) (*EnvoyGatewayInstaller, error) {
 	// Create temporary directory for charts
 	chartDir := HelmChartDir
 	if err := os.MkdirAll(chartDir, 0755); err != nil {
@@ -62,7 +57,7 @@ func NewEnvoyGatewayInstaller(kubeconfig string) (*EnvoyGatewayInstaller, error)
 	}
 
 	settings := cli.New()
-	settings.KubeConfig = kubeconfig
+	settings.KubeConfig = k8sClient.GetKubeconfigPath()
 	// Use a temporary directory for Helm cache
 	settings.RepositoryCache = HelmRepositoryDir
 	settings.RepositoryConfig = HelmRepositoryConfig

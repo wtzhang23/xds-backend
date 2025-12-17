@@ -8,24 +8,17 @@ data:
   config.yaml: |
     version_info: "1"
     resources:
+{{- range .Services }}
     - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
-      cluster_name: "{{ .TestServiceName }}"
+      cluster_name: "{{ .ServiceName }}"
       endpoints:
       - lb_endpoints:
         - endpoint:
             address:
               socket_address:
-                address: "{{ .TestServiceIP }}"
-                port_value: {{ .TestServicePort }}
-    - "@type": type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment
-      cluster_name: "{{ .TestServiceName }}-tls"
-      endpoints:
-      - lb_endpoints:
-        - endpoint:
-            address:
-              socket_address:
-                address: "{{ .TestServiceIP }}"
-                port_value: {{ .TestServiceTLSPort }}
+                address: "{{ .ServiceIP }}"
+                port_value: {{ .ServicePort }}
+{{- end }}
 {{ if .TlsCaCertPEM }}
     - "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret
       name: "{{ .TlsCaCertName }}"
