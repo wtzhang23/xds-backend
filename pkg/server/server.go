@@ -9,11 +9,11 @@ import (
 	clusterv3 "github.com/envoyproxy/go-control-plane/envoy/config/cluster/v3"
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	tlsv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/transport_sockets/tls/v3"
-	"github.com/gogo/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/wtzhang23/xds-backend/pkg/types"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"sigs.k8s.io/controller-runtime/pkg/metrics"
 )
@@ -171,7 +171,7 @@ func (s *Server) configureTLSForCluster(ctx context.Context, cluster *clusterv3.
 			return nil
 		}
 		newTlsSettings := &tlsv3.UpstreamTlsContext{}
-		if err := proto.Unmarshal(configType.TypedConfig.Value, newTlsSettings); err != nil {
+		if err := anypb.UnmarshalTo(configType.TypedConfig, newTlsSettings, proto.UnmarshalOptions{}); err != nil {
 			s.log.ErrorContext(ctx, "Failed to unmarshal TransportSocket", slog.String("error", err.Error()), slog.String("cluster", cluster.Name))
 			return nil
 		}
