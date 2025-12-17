@@ -553,104 +553,35 @@ var _ = Describe("xDS Backend Integration", func() {
 		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
 
-		Expect(applyTemplate(ctx, k8sClient, "xds-backend-inline-tls.yaml", XdsBackendInlineTLSTemplate{
-			XdsBackendGroup:        XdsBackendGroup,
-			XdsBackendAPIVersion:   XdsBackendAPIVersion,
-			XdsBackendKind:         XdsBackendKind,
-			XdsBackendResourceName: InlineTLSXdsBackendName,
-			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
-			FileXdsClusterName:     FileXdsClusterName,
-			TestServiceName:        fmt.Sprintf("%s-tls", TestServiceName),
-			TlsCaCertName:          InlineTLSCACertResourceName,
-			TlsHostname:            InlineTLSHostname,
-		})).To(Succeed())
-
-		Expect(applyTemplate(ctx, k8sClient, "httproute.yaml", HTTPRouteTemplate{
-			HTTPRouteName:          InlineTLSHTTPRouteName,
-			GatewayName:            GatewayName,
-			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
-			XdsBackendGroup:        XdsBackendGroup,
-			XdsBackendKind:         XdsBackendKind,
-			XdsBackendResourceName: InlineTLSXdsBackendName,
-			HTTPRoutePathPrefix:    InlineTLSPathPrefix,
-		})).To(Succeed())
-
-		By("Waiting for HTTPRoute to be ready")
-		Expect(k8sClient.WaitForHTTPRouteReady(ctx, EnvoyGatewayNamespace, InlineTLSHTTPRouteName, DeploymentTimeout)).To(Succeed())
-
-		By("Waiting for cluster to be created with TLS configuration")
-		labelSelector := fmt.Sprintf("%s=%s,%s=%s", EnvoyProxyOwningGatewayLabelKey, GatewayName, EnvoyProxyComponentLabelKey, EnvoyProxyComponentLabelValue)
-		pods, err := k8sClient.GetClientset().CoreV1().Pods(EnvoyGatewayNamespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(len(pods.Items)).To(BeNumerically(">", 0))
-		podName := pods.Items[0].Name
-
-		By("Waiting for cluster to be created with TLS configuration")
-		expectedClusterName := fmt.Sprintf("httproute/%s/%s/rule/0", EnvoyGatewayNamespace, InlineTLSHTTPRouteName)
-		var lastConfigDump string
-		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
-			configDump, err := getEnvoyAdminConfigDump(ctx, k8sClient, EnvoyGatewayNamespace, podName)
-			if err != nil {
-				return false, nil
-			}
-			lastConfigDump = configDump
-			if !strings.Contains(configDump, expectedClusterName) {
-				return false, nil
-			}
-			clusterHasTLS := strings.Contains(configDump, "envoy.transport_sockets.tls")
-			return clusterHasTLS, nil
-		})).To(Succeed(), func() string {
-			clusters := extractClusterNames(lastConfigDump)
-			return fmt.Sprintf("Expected cluster %s with TLS configuration not found. Available clusters: %v", expectedClusterName, clusters)
+		runTLSTest(ctx, k8sClient, TLSTestConfig{
+			TestName:          "inline TLS with CA certificate and hostname",
+			XdsBackendName:    InlineTLSXdsBackendName,
+			HTTPRouteName:     InlineTLSHTTPRouteName,
+			PathPrefix:        InlineTLSPathPrefix,
+			TestServiceName:   fmt.Sprintf("%s-tls", TestServiceName),
+			TlsEnabled:        true,
+			TlsCaCertName:     InlineTLSCACertResourceName,
+			TlsHostname:       InlineTLSHostname,
+			ExpectTLSInConfig: true,
+			ExpectHTTPSuccess: true,
 		})
+	})
 
-		restConfig := k8sClient.GetConfig()
-		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
-		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
+	It("should handle insecure TLS configuration with empty but non-nil TLS config", func() {
+		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
-		defer pf.Stop()
 
-		var resp *http.Response
-		var lastErr error
-		var lastStatusCode int
-		tlsClientTimeout := 30 * time.Second
-		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
-			client := &http.Client{Timeout: tlsClientTimeout}
-			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, InlineTLSPathPrefix), nil)
-			if err != nil {
-				lastErr = err
-				return false, nil
-			}
-			req.Header.Set("Host", "*")
-
-			attemptResp, err := client.Do(req)
-			if err != nil {
-				lastErr = err
-				// Log the error for debugging but continue retrying
-				defaultLogger.Logf("HTTP request attempt failed: %v", err)
-				return false, nil // Retry on network error
-			}
-			lastStatusCode = attemptResp.StatusCode
-
-			// Success if we get 200 OK
-			if attemptResp.StatusCode == http.StatusOK {
-				resp = attemptResp
-				return true, nil
-			}
-			// Close body and retry on 503 or other non-OK status codes
-			attemptResp.Body.Close()
-			defaultLogger.Logf("HTTP request returned status code %d, retrying...", lastStatusCode)
-			return false, nil
-		})).To(Succeed(), func() string {
-			if lastErr != nil {
-				return fmt.Sprintf("HTTP request failed with error: %v (this may indicate Envoy cannot connect to the TLS backend)", lastErr)
-			}
-			return fmt.Sprintf("HTTP request returned status code %d instead of 200", lastStatusCode)
+		runTLSTest(ctx, k8sClient, TLSTestConfig{
+			TestName:        "empty TLS config (tls: {})",
+			XdsBackendName:  InsecureTLSXdsBackendName,
+			HTTPRouteName:   InsecureTLSHTTPRouteName,
+			PathPrefix:      InsecureTLSPathPrefix,
+			TestServiceName: TestServiceName,
+			TlsEnabled:      true,
+			// No TlsCaCertName or TlsHostname provided, so outputs empty TLS config (tls: {})
+			ExpectTLSInConfig: false, // Empty TLS config may or may not show up in config dump
+			ExpectHTTPSuccess: false, // Connection may fail due to TLS validation
 		})
-		defer resp.Body.Close()
-		Expect(resp.StatusCode).To(Equal(http.StatusOK))
-
-		time.Sleep(EnvoyAccessLogFlushDelay)
 	})
 
 	It("should support multiple custom backendRefs in HTTPRoute", func() {
@@ -1246,4 +1177,130 @@ func collectLogs(ctx context.Context, k8sClient *K8sClient, testStartTime time.T
 			writeLogToFile("envoy-config-dump", configDump)
 		}
 	}
+}
+
+// TLSTestConfig holds configuration for TLS tests
+type TLSTestConfig struct {
+	TestName          string
+	XdsBackendName    string
+	HTTPRouteName     string
+	PathPrefix        string
+	TestServiceName   string
+	TlsEnabled        bool
+	TlsCaCertName     string
+	TlsCaCertEmpty    bool
+	TlsHostname       string
+	ExpectTLSInConfig bool // Whether to expect TLS configuration in Envoy config dump
+	ExpectHTTPSuccess bool // Whether to expect successful HTTP requests (default: true)
+}
+
+// runTLSTest is a helper function to run TLS configuration tests
+func runTLSTest(ctx context.Context, k8sClient *K8sClient, config TLSTestConfig) {
+	By(fmt.Sprintf("Creating XdsBackend: %s", config.TestName))
+	Expect(applyTemplate(ctx, k8sClient, "xds-backend-filexds.yaml", XdsBackendFileXdsTemplate{
+		XdsBackendGroup:        XdsBackendGroup,
+		XdsBackendAPIVersion:   XdsBackendAPIVersion,
+		XdsBackendKind:         XdsBackendKind,
+		XdsBackendResourceName: config.XdsBackendName,
+		EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
+		FileXdsClusterName:     FileXdsClusterName,
+		TestServiceName:        config.TestServiceName,
+		TlsEnabled:             config.TlsEnabled,
+		TlsCaCertName:          config.TlsCaCertName,
+		TlsCaCertEmpty:         config.TlsCaCertEmpty,
+		TlsHostname:            config.TlsHostname,
+	})).To(Succeed())
+
+	By(fmt.Sprintf("Creating HTTPRoute: %s", config.TestName))
+	Expect(applyTemplate(ctx, k8sClient, "httproute.yaml", HTTPRouteTemplate{
+		HTTPRouteName:          config.HTTPRouteName,
+		GatewayName:            GatewayName,
+		EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
+		XdsBackendGroup:        XdsBackendGroup,
+		XdsBackendKind:         XdsBackendKind,
+		XdsBackendResourceName: config.XdsBackendName,
+		HTTPRoutePathPrefix:    config.PathPrefix,
+	})).To(Succeed())
+
+	By("Waiting for HTTPRoute to be ready")
+	Expect(k8sClient.WaitForHTTPRouteReady(ctx, EnvoyGatewayNamespace, config.HTTPRouteName, DeploymentTimeout)).To(Succeed())
+
+	By("Checking cluster configuration in Envoy")
+	labelSelector := fmt.Sprintf("%s=%s,%s=%s", EnvoyProxyOwningGatewayLabelKey, GatewayName, EnvoyProxyComponentLabelKey, EnvoyProxyComponentLabelValue)
+	pods, err := k8sClient.GetClientset().CoreV1().Pods(EnvoyGatewayNamespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(len(pods.Items)).To(BeNumerically(">", 0))
+	podName := pods.Items[0].Name
+
+	expectedClusterName := fmt.Sprintf("httproute/%s/%s/rule/0", EnvoyGatewayNamespace, config.HTTPRouteName)
+	var lastConfigDump string
+	Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
+		configDump, err := getEnvoyAdminConfigDump(ctx, k8sClient, EnvoyGatewayNamespace, podName)
+		if err != nil {
+			return false, nil
+		}
+		lastConfigDump = configDump
+		if !strings.Contains(configDump, expectedClusterName) {
+			return false, nil
+		}
+		if config.ExpectTLSInConfig {
+			clusterHasTLS := strings.Contains(configDump, "envoy.transport_sockets.tls")
+			return clusterHasTLS, nil
+		}
+		return true, nil
+	})).To(Succeed(), func() string {
+		clusters := extractClusterNames(lastConfigDump)
+		return fmt.Sprintf("Expected cluster %s not found. Available clusters: %v", expectedClusterName, clusters)
+	})
+
+	// Test HTTP connectivity if ExpectHTTPSuccess is true (default)
+	if config.ExpectHTTPSuccess {
+		By("Testing HTTP connectivity")
+		restConfig := k8sClient.GetConfig()
+		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
+		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
+		Expect(err).NotTo(HaveOccurred())
+		defer pf.Stop()
+
+		var resp *http.Response
+		var lastErr error
+		var lastStatusCode int
+		tlsClientTimeout := 30 * time.Second
+		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
+			client := &http.Client{Timeout: tlsClientTimeout}
+			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, config.PathPrefix), nil)
+			if err != nil {
+				lastErr = err
+				return false, nil
+			}
+			req.Header.Set("Host", "*")
+
+			attemptResp, err := client.Do(req)
+			if err != nil {
+				lastErr = err
+				defaultLogger.Logf("HTTP request attempt failed: %v", err)
+				return false, nil
+			}
+			lastStatusCode = attemptResp.StatusCode
+
+			if attemptResp.StatusCode == http.StatusOK {
+				resp = attemptResp
+				return true, nil
+			}
+			attemptResp.Body.Close()
+			defaultLogger.Logf("HTTP request returned status code %d, retrying...", lastStatusCode)
+			return false, nil
+		})).To(Succeed(), func() string {
+			if lastErr != nil {
+				return fmt.Sprintf("HTTP request failed with error: %v", lastErr)
+			}
+			return fmt.Sprintf("HTTP request returned status code %d instead of 200", lastStatusCode)
+		})
+		if resp != nil {
+			defer resp.Body.Close()
+			Expect(resp.StatusCode).To(Equal(http.StatusOK))
+		}
+	}
+
+	time.Sleep(EnvoyAccessLogFlushDelay)
 }

@@ -201,4 +201,9 @@ const (
 	XdsBackend1Name                  = "test-backend-1"
 	XdsBackend2Name                  = "test-backend-2"
 	MultipleBackendRefsConfigMapName = "filexds-server-config-multiple-backends"
+
+	// InsecureTLS test constants
+	InsecureTLSHTTPRouteName  = "test-route-insecure-tls"
+	InsecureTLSXdsBackendName = "test-backend-insecure-tls"
+	InsecureTLSPathPrefix     = "/insecure-tls"
 )
