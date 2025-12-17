@@ -28,21 +28,20 @@ spec:
         - name: tls-certs
           mountPath: /etc/nginx/tls
           readOnly: true
+        {{ end }}
         - name: nginx-config
           mountPath: /etc/nginx/conf.d
           readOnly: true
-        {{ end }}
       volumes:
       {{ if .TestServiceTLSSecretName }}
       - name: tls-certs
         secret:
           secretName: {{ .TestServiceTLSSecretName }}
+      {{ end }}
       - name: nginx-config
         configMap:
           name: {{ .TestServiceName }}-nginx-config
-      {{ end }}
 ---
-{{ if .TestServiceTLSSecretName }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -55,11 +54,11 @@ data:
         listen {{ .TestServicePort }};
         
         location / {
-            return 200 "Hello from test service\n";
+            return 200 "{{ .TestServiceResponse }}\n";
             add_header Content-Type text/plain;
         }
     }
-    
+    {{ if .TestServiceTLSSecretName }}
     # TLS HTTPS listener
     server {
         listen {{ .TestServiceTLSPort }} ssl;
@@ -67,8 +66,8 @@ data:
         ssl_certificate_key /etc/nginx/tls/tls.key;
         
         location / {
-            return 200 "Hello from test service\n";
+            return 200 "{{ .TestServiceResponse }}\n";
             add_header Content-Type text/plain;
         }
     }
-{{ end }}
+    {{ end }}

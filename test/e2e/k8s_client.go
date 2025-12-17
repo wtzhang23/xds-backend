@@ -251,6 +251,16 @@ func (k *K8sClient) getResourceClient(gvk *schema.GroupVersionKind, namespace st
 	return baseClient.Namespace(namespace), nil
 }
 
+// RefreshRESTMapper refreshes the REST mapper cache to discover newly installed CRDs
+func (k *K8sClient) RefreshRESTMapper(ctx context.Context) error {
+	discoveryClient := k.clientset.Discovery()
+	cachedDiscoveryClient := memory.NewMemCacheClient(discoveryClient)
+	k.mapper = restmapper.NewDeferredDiscoveryRESTMapper(cachedDiscoveryClient)
+	// Force a refresh by invalidating the cache
+	cachedDiscoveryClient.Invalidate()
+	return nil
+}
+
 // WaitForCRD waits for a CRD to be installed and established
 func (k *K8sClient) WaitForCRD(ctx context.Context, crdName string) error {
 	apiextensionsClient, err := apiextensionsclient.NewForConfig(k.config)

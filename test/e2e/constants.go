@@ -192,4 +192,13 @@ const (
 	InlineTLSCACertResourceName = "inline-tls-ca"
 	InlineTLSPathPrefix         = "/inline-tls"
 	InlineTLSHostname           = "test-http-service.test-namespace.svc.cluster.local"
+
+	// MultipleBackendRefs test constants
+	MultipleBackendRefsHTTPRouteName = "test-route-multiple-backends"
+	MultipleBackendRefsPathPrefix    = "/multiple-backends"
+	TestService2Name                 = "test-http-service-2"
+	TestService2Port                 = 8081
+	XdsBackend1Name                  = "test-backend-1"
+	XdsBackend2Name                  = "test-backend-2"
+	MultipleBackendRefsConfigMapName = "filexds-server-config-multiple-backends"
 )

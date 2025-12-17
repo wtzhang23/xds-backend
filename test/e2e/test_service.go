@@ -36,12 +36,17 @@ func (d *TestServiceDeployer) DeployWithTLS(ctx context.Context, namespace, name
 	}
 
 	// Load deployment template
+	responseMessage := "Hello from test service"
+	if name == TestService2Name {
+		responseMessage = "Response from service 2"
+	}
 	templateData := TestServiceDeploymentTemplate{
-		TestServiceName:       name,
-		TestNamespace:         namespace,
-		TestServicePort:       port,
+		TestServiceName:          name,
+		TestNamespace:            namespace,
+		TestServicePort:          port,
 		TestServiceTLSSecretName: tlsSecretName,
-		TestServiceTLSPort:     tlsPort,
+		TestServiceTLSPort:       tlsPort,
+		TestServiceResponse:      responseMessage,
 	}
 	deploymentTemplatePath := "test-service-deployment.yaml"
 	deploymentYaml, err := LoadTemplate(deploymentTemplatePath, templateData)

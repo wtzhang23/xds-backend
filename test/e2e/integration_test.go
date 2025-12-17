@@ -124,35 +124,10 @@ var _ = Describe("xDS Backend Integration", func() {
 			return err == nil && strings.Contains(configDump, ExpectedClusterName), nil
 		})).To(Succeed())
 		restConfig := k8sClient.GetConfig()
-		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", EnvoyGatewayNamespace, podName)
-		transport, upgrader, err := spdy.RoundTripperFor(restConfig)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL, err := url.Parse(restConfig.Host)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL.Path = path
-		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", baseURL)
-
-		stopChan := make(chan struct{}, 1)
-		readyChan := make(chan struct{}, 1)
-		errChan := make(chan error, 1)
 		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
-		fw, err := portforward.New(dialer, []string{portMapping}, stopChan, readyChan, nil, nil)
+		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
 		Expect(err).NotTo(HaveOccurred())
-
-		go func() {
-			if err := fw.ForwardPorts(); err != nil {
-				errChan <- err
-			}
-		}()
-		defer close(stopChan)
-
-		select {
-		case <-ctx.Done():
-			Fail(fmt.Sprintf("context cancelled: %v", ctx.Err()))
-		case err := <-errChan:
-			Fail(fmt.Sprintf("port forward error: %v", err))
-		case <-readyChan:
-		}
+		defer pf.Stop()
 
 		var resp *http.Response
 		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
@@ -198,35 +173,10 @@ var _ = Describe("xDS Backend Integration", func() {
 
 		// Setup port forward to metrics port
 		restConfig := k8sClient.GetConfig()
-		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", ExtensionServerNamespace, podName)
-		transport, upgrader, err := spdy.RoundTripperFor(restConfig)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL, err := url.Parse(restConfig.Host)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL.Path = path
-		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", baseURL)
-
-		stopChan := make(chan struct{}, 1)
-		readyChan := make(chan struct{}, 1)
-		errChan := make(chan error, 1)
 		portMapping := fmt.Sprintf("%d:%d", ExtensionServerMetricsPort, ExtensionServerMetricsPort)
-		fw, err := portforward.New(dialer, []string{portMapping}, stopChan, readyChan, nil, nil)
+		pf, err := SetupPortForward(ctx, restConfig, ExtensionServerNamespace, podName, []string{portMapping})
 		Expect(err).NotTo(HaveOccurred())
-
-		go func() {
-			if err := fw.ForwardPorts(); err != nil {
-				errChan <- err
-			}
-		}()
-		defer close(stopChan)
-
-		select {
-		case <-ctx.Done():
-			Fail(fmt.Sprintf("context cancelled: %v", ctx.Err()))
-		case err := <-errChan:
-			Fail(fmt.Sprintf("port forward error: %v", err))
-		case <-readyChan:
-		}
+		defer pf.Stop()
 
 		time.Sleep(MetricsCollectionDelay)
 
@@ -332,35 +282,10 @@ var _ = Describe("xDS Backend Integration", func() {
 
 		time.Sleep(EnvoyEndpointProcessingDelay)
 		restConfig := k8sClient.GetConfig()
-		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", EnvoyGatewayNamespace, podName)
-		transport, upgrader, err := spdy.RoundTripperFor(restConfig)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL, err := url.Parse(restConfig.Host)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL.Path = path
-		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", baseURL)
-
-		stopChan := make(chan struct{}, 1)
-		readyChan := make(chan struct{}, 1)
-		errChan := make(chan error, 1)
 		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
-		fw, err := portforward.New(dialer, []string{portMapping}, stopChan, readyChan, nil, nil)
+		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
 		Expect(err).NotTo(HaveOccurred())
-
-		go func() {
-			if err := fw.ForwardPorts(); err != nil {
-				errChan <- err
-			}
-		}()
-		defer close(stopChan)
-
-		select {
-		case <-ctx.Done():
-			Fail(fmt.Sprintf("context cancelled: %v", ctx.Err()))
-		case err := <-errChan:
-			Fail(fmt.Sprintf("port forward error: %v", err))
-		case <-readyChan:
-		}
+		defer pf.Stop()
 
 		var resp *http.Response
 		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
@@ -413,36 +338,11 @@ var _ = Describe("xDS Backend Integration", func() {
 
 		// Setup port forward to TLS port
 		restConfig := k8sClient.GetConfig()
-		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", ExtensionServerNamespace, podName)
-		transport, upgrader, err := spdy.RoundTripperFor(restConfig)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL, err := url.Parse(restConfig.Host)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL.Path = path
-		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", baseURL)
-
-		stopChan := make(chan struct{}, 1)
-		readyChan := make(chan struct{}, 1)
-		errChan := make(chan error, 1)
 		localPort := 5007 // Local port for forwarding
 		portMapping := fmt.Sprintf("%d:%d", localPort, ExtensionServerTLSPort)
-		fw, err := portforward.New(dialer, []string{portMapping}, stopChan, readyChan, nil, nil)
+		pf, err := SetupPortForward(ctx, restConfig, ExtensionServerNamespace, podName, []string{portMapping})
 		Expect(err).NotTo(HaveOccurred())
-
-		go func() {
-			if err := fw.ForwardPorts(); err != nil {
-				errChan <- err
-			}
-		}()
-		defer close(stopChan)
-
-		select {
-		case <-ctx.Done():
-			Fail(fmt.Sprintf("context cancelled: %v", ctx.Err()))
-		case err := <-errChan:
-			Fail(fmt.Sprintf("port forward error: %v", err))
-		case <-readyChan:
-		}
+		defer pf.Stop()
 
 		// Connect to gRPC server over TLS
 		conn, err := grpc.NewClient(
@@ -630,35 +530,10 @@ var _ = Describe("xDS Backend Integration", func() {
 
 		// Setup port forward and send HTTP request
 		restConfig := k8sClient.GetConfig()
-		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", EnvoyGatewayNamespace, podName)
-		transport, upgrader, err := spdy.RoundTripperFor(restConfig)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL, err := url.Parse(restConfig.Host)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL.Path = path
-		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", baseURL)
-
-		stopChan := make(chan struct{}, 1)
-		readyChan := make(chan struct{}, 1)
-		errChan := make(chan error, 1)
 		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
-		fw, err := portforward.New(dialer, []string{portMapping}, stopChan, readyChan, nil, nil)
+		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
 		Expect(err).NotTo(HaveOccurred())
-
-		go func() {
-			if err := fw.ForwardPorts(); err != nil {
-				errChan <- err
-			}
-		}()
-		defer close(stopChan)
-
-		select {
-		case <-ctx.Done():
-			Fail(fmt.Sprintf("context cancelled: %v", ctx.Err()))
-		case err := <-errChan:
-			Fail(fmt.Sprintf("port forward error: %v", err))
-		case <-readyChan:
-		}
+		defer pf.Stop()
 
 		var resp *http.Response
 		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
@@ -754,49 +629,33 @@ var _ = Describe("xDS Backend Integration", func() {
 
 		// Setup port forward and send HTTP request
 		restConfig := k8sClient.GetConfig()
-		path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", EnvoyGatewayNamespace, podName)
-		transport, upgrader, err := spdy.RoundTripperFor(restConfig)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL, err := url.Parse(restConfig.Host)
-		Expect(err).NotTo(HaveOccurred())
-		baseURL.Path = path
-		dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, "POST", baseURL)
-
-		stopChan := make(chan struct{}, 1)
-		readyChan := make(chan struct{}, 1)
-		errChan := make(chan error, 1)
 		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
-		fw, err := portforward.New(dialer, []string{portMapping}, stopChan, readyChan, nil, nil)
+		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
 		Expect(err).NotTo(HaveOccurred())
-
-		go func() {
-			if err := fw.ForwardPorts(); err != nil {
-				errChan <- err
-			}
-		}()
-		defer close(stopChan)
-
-		select {
-		case <-ctx.Done():
-			Fail(fmt.Sprintf("context cancelled: %v", ctx.Err()))
-		case err := <-errChan:
-			Fail(fmt.Sprintf("port forward error: %v", err))
-		case <-readyChan:
-		}
+		defer pf.Stop()
 
 		var resp *http.Response
+		var lastErr error
+		var lastStatusCode int
+		// Use a longer timeout for TLS connections
+		tlsClientTimeout := 30 * time.Second
 		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
-			client := &http.Client{Timeout: HTTPClientTimeout}
+			client := &http.Client{Timeout: tlsClientTimeout}
 			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, InlineTLSPathPrefix), nil)
 			if err != nil {
-				return false, err
+				lastErr = err
+				return false, nil
 			}
 			req.Header.Set("Host", "*")
 
 			attemptResp, err := client.Do(req)
 			if err != nil {
+				lastErr = err
+				// Log the error for debugging but continue retrying
+				defaultLogger.Logf("HTTP request attempt failed: %v", err)
 				return false, nil // Retry on network error
 			}
+			lastStatusCode = attemptResp.StatusCode
 
 			// Success if we get 200 OK
 			if attemptResp.StatusCode == http.StatusOK {
@@ -805,10 +664,152 @@ var _ = Describe("xDS Backend Integration", func() {
 			}
 			// Close body and retry on 503 or other non-OK status codes
 			attemptResp.Body.Close()
+			defaultLogger.Logf("HTTP request returned status code %d, retrying...", lastStatusCode)
 			return false, nil
-		})).To(Succeed())
+		})).To(Succeed(), func() string {
+			if lastErr != nil {
+				return fmt.Sprintf("HTTP request failed with error: %v (this may indicate Envoy cannot connect to the TLS backend)", lastErr)
+			}
+			return fmt.Sprintf("HTTP request returned status code %d instead of 200", lastStatusCode)
+		})
 		defer resp.Body.Close()
 		Expect(resp.StatusCode).To(Equal(http.StatusOK))
+
+		time.Sleep(EnvoyAccessLogFlushDelay)
+	})
+
+	It("should support multiple custom backendRefs in HTTPRoute", func() {
+		if !runExperimental {
+			Skip("Skipping experimental test (use -experimental flag to enable)")
+		}
+
+		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
+		Expect(err).NotTo(HaveOccurred())
+
+		By("Creating XdsBackend resources for multiple backends")
+		Expect(applyTemplate(ctx, k8sClient, "xds-backend-filexds.yaml", XdsBackendFileXdsTemplate{
+			XdsBackendGroup:        XdsBackendGroup,
+			XdsBackendAPIVersion:   XdsBackendAPIVersion,
+			XdsBackendKind:         XdsBackendKind,
+			XdsBackendResourceName: XdsBackend1Name,
+			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
+			FileXdsClusterName:     FileXdsClusterName,
+			TestServiceName:        TestServiceName,
+		})).To(Succeed())
+
+		Expect(applyTemplate(ctx, k8sClient, "xds-backend-filexds.yaml", XdsBackendFileXdsTemplate{
+			XdsBackendGroup:        XdsBackendGroup,
+			XdsBackendAPIVersion:   XdsBackendAPIVersion,
+			XdsBackendKind:         XdsBackendKind,
+			XdsBackendResourceName: XdsBackend2Name,
+			EnvoyGatewayNamespace:  EnvoyGatewayNamespace,
+			FileXdsClusterName:     FileXdsClusterName,
+			TestServiceName:        TestService2Name,
+		})).To(Succeed())
+
+		By("Creating HTTPRoute with multiple backendRefs")
+		Expect(applyTemplate(ctx, k8sClient, "httproute.yaml", HTTPRouteTemplate{
+			HTTPRouteName:         MultipleBackendRefsHTTPRouteName,
+			GatewayName:           GatewayName,
+			EnvoyGatewayNamespace: EnvoyGatewayNamespace,
+			HTTPRoutePathPrefix:   MultipleBackendRefsPathPrefix,
+			BackendRefs: []BackendRef{
+				{
+					Group:     XdsBackendGroup,
+					Kind:      XdsBackendKind,
+					Name:      XdsBackend1Name,
+					Namespace: EnvoyGatewayNamespace,
+					Weight:    1,
+				},
+				{
+					Group:     XdsBackendGroup,
+					Kind:      XdsBackendKind,
+					Name:      XdsBackend2Name,
+					Namespace: EnvoyGatewayNamespace,
+					Weight:    2,
+				},
+			},
+		})).To(Succeed())
+
+		By("Waiting for HTTPRoute to be ready")
+		Expect(k8sClient.WaitForHTTPRouteReady(ctx, EnvoyGatewayNamespace, MultipleBackendRefsHTTPRouteName, DeploymentTimeout)).To(Succeed())
+
+		By("Waiting for clusters to be created in Envoy")
+		labelSelector := fmt.Sprintf("%s=%s,%s=%s", EnvoyProxyOwningGatewayLabelKey, GatewayName, EnvoyProxyComponentLabelKey, EnvoyProxyComponentLabelValue)
+		pods, err := k8sClient.GetClientset().CoreV1().Pods(EnvoyGatewayNamespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(len(pods.Items)).To(BeNumerically(">", 0))
+		podName := pods.Items[0].Name
+
+		expectedClusterName := fmt.Sprintf("httproute/%s/%s/rule/0", EnvoyGatewayNamespace, MultipleBackendRefsHTTPRouteName)
+		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, DeploymentTimeout, true, func(ctx context.Context) (bool, error) {
+			configDump, err := getEnvoyAdminConfigDump(ctx, k8sClient, EnvoyGatewayNamespace, podName)
+			if err != nil {
+				return false, nil
+			}
+			return strings.Contains(configDump, expectedClusterName), nil
+		})).To(Succeed())
+
+		By("Setting up port forward to Envoy proxy")
+		restConfig := k8sClient.GetConfig()
+		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
+		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
+		Expect(err).NotTo(HaveOccurred())
+		defer pf.Stop()
+
+		By("Making requests to verify both backends are reachable")
+		client := &http.Client{Timeout: HTTPClientTimeout}
+		responses := make(map[string]int)
+		service1Response := "Hello from test service\n"
+		service2Response := "Response from service 2\n"
+
+		// Poll until we've received responses from both backends
+		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
+			req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("http://localhost:%d%s", EnvoyProxyPodPort, MultipleBackendRefsPathPrefix), nil)
+			if err != nil {
+				return false, nil // Retry on request creation error
+			}
+			req.Header.Set("Host", "*")
+
+			resp, err := client.Do(req)
+			if err != nil {
+				return false, nil // Retry on network error
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				body, err := io.ReadAll(resp.Body)
+				if err == nil {
+					responseText := string(body)
+					responses[responseText] = responses[responseText] + 1
+				}
+			}
+
+			// Check if we've received responses from both backends
+			service1Count := responses[service1Response]
+			service2Count := responses[service2Response]
+			if service1Count > 0 && service2Count > 0 {
+				return true, nil // Both backends responded
+			}
+
+			// Small delay between requests
+			time.Sleep(100 * time.Millisecond)
+			return false, nil // Continue polling
+		})).To(Succeed(), func() string {
+			service1Count := responses[service1Response]
+			service2Count := responses[service2Response]
+			return fmt.Sprintf("Expected responses from both backends, but got: service-1=%d, service-2=%d. All responses: %v", service1Count, service2Count, responses)
+		})
+
+		By("Verifying both responses were detected")
+		service1Count := responses[service1Response]
+		service2Count := responses[service2Response]
+
+		defaultLogger.Logf("Response counts - service-1: %d, service-2: %d", service1Count, service2Count)
+		defaultLogger.Logf("All responses: %v", responses)
+
+		Expect(service1Count).To(BeNumerically(">", 0), "Should have received at least one response from service-1")
+		Expect(service2Count).To(BeNumerically(">", 0), "Should have received at least one response from service-2")
 
 		time.Sleep(EnvoyAccessLogFlushDelay)
 	})
