@@ -88,8 +88,6 @@ var _ = Describe("xDS Backend Integration", func() {
 		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
 
-		// Create resources
-		// Use eds-config.yaml which contains only one resource (required for file-based EDS)
 		Expect(applyTemplate(ctx, k8sClient, "xds-backend.yaml", XdsBackendTemplate{
 			XdsBackendGroup:        XdsBackendGroup,
 			XdsBackendAPIVersion:   XdsBackendAPIVersion,
@@ -112,7 +110,6 @@ var _ = Describe("xDS Backend Integration", func() {
 
 		Expect(k8sClient.WaitForHTTPRouteReady(ctx, EnvoyGatewayNamespace, HTTPRouteName, DeploymentTimeout)).To(Succeed())
 
-		// Wait for backend cluster to be created
 		labelSelector := fmt.Sprintf("%s=%s,%s=%s", EnvoyProxyOwningGatewayLabelKey, GatewayName, EnvoyProxyComponentLabelKey, EnvoyProxyComponentLabelValue)
 		pods, err := k8sClient.GetClientset().CoreV1().Pods(EnvoyGatewayNamespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
 		Expect(err).NotTo(HaveOccurred())
@@ -160,10 +157,7 @@ var _ = Describe("xDS Backend Integration", func() {
 		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
 
-		// Wait for extension server pods to be ready
 		Expect(k8sClient.WaitForPodsReady(ctx, ExtensionServerNamespace, ExtensionServerLabelSelector, DeploymentTimeout)).To(Succeed())
-
-		// Get extension server pod
 		pods, err := k8sClient.GetClientset().CoreV1().Pods(ExtensionServerNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: ExtensionServerLabelSelector,
 		})
@@ -171,7 +165,6 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(len(pods.Items)).To(BeNumerically(">", 0))
 		podName := pods.Items[0].Name
 
-		// Setup port forward to metrics port
 		restConfig := k8sClient.GetConfig()
 		portMapping := fmt.Sprintf("%d:%d", ExtensionServerMetricsPort, ExtensionServerMetricsPort)
 		pf, err := SetupPortForward(ctx, restConfig, ExtensionServerNamespace, podName, []string{portMapping})
@@ -276,7 +269,6 @@ var _ = Describe("xDS Backend Integration", func() {
 			if err != nil {
 				return false, nil
 			}
-			// Check that cluster exists
 			return strings.Contains(configDump, FileXdsExpectedClusterName), nil
 		})).To(Succeed())
 
@@ -324,11 +316,9 @@ var _ = Describe("xDS Backend Integration", func() {
 		certPEM := secret.Data["tls.crt"]
 		Expect(certPEM).NotTo(BeEmpty())
 
-		// Create TLS config for client
 		tlsConfig, err := CreateTLSConfig(certPEM)
 		Expect(err).NotTo(HaveOccurred())
 
-		// Get extension server pod for port forwarding
 		pods, err := k8sClient.GetClientset().CoreV1().Pods(ExtensionServerNamespace).List(ctx, metav1.ListOptions{
 			LabelSelector: ExtensionServerLabelSelector,
 		})
@@ -336,15 +326,13 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(len(pods.Items)).To(BeNumerically(">", 0))
 		podName := pods.Items[0].Name
 
-		// Setup port forward to TLS port
 		restConfig := k8sClient.GetConfig()
-		localPort := 5007 // Local port for forwarding
+		localPort := 5007
 		portMapping := fmt.Sprintf("%d:%d", localPort, ExtensionServerTLSPort)
 		pf, err := SetupPortForward(ctx, restConfig, ExtensionServerNamespace, podName, []string{portMapping})
 		Expect(err).NotTo(HaveOccurred())
 		defer pf.Stop()
 
-		// Connect to gRPC server over TLS
 		conn, err := grpc.NewClient(
 			fmt.Sprintf("localhost:%d", localPort),
 			grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
@@ -352,7 +340,6 @@ var _ = Describe("xDS Backend Integration", func() {
 		Expect(err).NotTo(HaveOccurred())
 		defer conn.Close()
 
-		// Make a simple health check query to verify TLS connection works
 		healthClient := grpc_health_v1.NewHealthClient(conn)
 		healthResp, err := healthClient.Check(ctx, &grpc_health_v1.HealthCheckRequest{})
 		Expect(err).NotTo(HaveOccurred())
@@ -528,7 +515,6 @@ var _ = Describe("xDS Backend Integration", func() {
 			return fmt.Sprintf("Expected cluster %s not found. Available clusters: %v", expectedClusterName, clusters)
 		})
 
-		// Setup port forward and send HTTP request
 		restConfig := k8sClient.GetConfig()
 		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
 		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
@@ -546,10 +532,9 @@ var _ = Describe("xDS Backend Integration", func() {
 
 			attemptResp, err := client.Do(req)
 			if err != nil {
-				return false, nil // Retry on network error
+				return false, nil
 			}
 
-			// Success if we get 200 OK
 			if attemptResp.StatusCode == http.StatusOK {
 				resp = attemptResp
 				return true, nil
@@ -568,11 +553,6 @@ var _ = Describe("xDS Backend Integration", func() {
 		k8sClient, err := NewK8sClient(cluster.GetKubeconfigPath())
 		Expect(err).NotTo(HaveOccurred())
 
-		// The TLS certificate is already in the filexds ConfigMap (created in BeforeSuite)
-		// The filexds ConfigMap is mounted in EnvoyProxy at /etc/envoy/xds
-
-		// Create XdsBackend with inline TLS configuration
-		// The CA cert is served by the filexds server via SDS
 		Expect(applyTemplate(ctx, k8sClient, "xds-backend-inline-tls.yaml", XdsBackendInlineTLSTemplate{
 			XdsBackendGroup:        XdsBackendGroup,
 			XdsBackendAPIVersion:   XdsBackendAPIVersion,
@@ -585,7 +565,6 @@ var _ = Describe("xDS Backend Integration", func() {
 			TlsHostname:            InlineTLSHostname,
 		})).To(Succeed())
 
-		// Create HTTPRoute
 		Expect(applyTemplate(ctx, k8sClient, "httproute.yaml", HTTPRouteTemplate{
 			HTTPRouteName:          InlineTLSHTTPRouteName,
 			GatewayName:            GatewayName,
@@ -599,7 +578,7 @@ var _ = Describe("xDS Backend Integration", func() {
 		By("Waiting for HTTPRoute to be ready")
 		Expect(k8sClient.WaitForHTTPRouteReady(ctx, EnvoyGatewayNamespace, InlineTLSHTTPRouteName, DeploymentTimeout)).To(Succeed())
 
-		// Wait for cluster to be created with TLS configuration
+		By("Waiting for cluster to be created with TLS configuration")
 		labelSelector := fmt.Sprintf("%s=%s,%s=%s", EnvoyProxyOwningGatewayLabelKey, GatewayName, EnvoyProxyComponentLabelKey, EnvoyProxyComponentLabelValue)
 		pods, err := k8sClient.GetClientset().CoreV1().Pods(EnvoyGatewayNamespace).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
 		Expect(err).NotTo(HaveOccurred())
@@ -618,8 +597,6 @@ var _ = Describe("xDS Backend Integration", func() {
 			if !strings.Contains(configDump, expectedClusterName) {
 				return false, nil
 			}
-			// Verify that the cluster has TLS configuration (transport_socket with envoy.transport_sockets.tls)
-			// This ensures the Secret has been fetched and TLS is configured
 			clusterHasTLS := strings.Contains(configDump, "envoy.transport_sockets.tls")
 			return clusterHasTLS, nil
 		})).To(Succeed(), func() string {
@@ -627,7 +604,6 @@ var _ = Describe("xDS Backend Integration", func() {
 			return fmt.Sprintf("Expected cluster %s with TLS configuration not found. Available clusters: %v", expectedClusterName, clusters)
 		})
 
-		// Setup port forward and send HTTP request
 		restConfig := k8sClient.GetConfig()
 		portMapping := fmt.Sprintf("%d:%d", EnvoyProxyPodPort, EnvoyProxyPodPort)
 		pf, err := SetupPortForward(ctx, restConfig, EnvoyGatewayNamespace, podName, []string{portMapping})
@@ -637,7 +613,6 @@ var _ = Describe("xDS Backend Integration", func() {
 		var resp *http.Response
 		var lastErr error
 		var lastStatusCode int
-		// Use a longer timeout for TLS connections
 		tlsClientTimeout := 30 * time.Second
 		Expect(wait.PollUntilContextTimeout(ctx, TestPollInterval, HTTPRequestTimeout, true, func(ctx context.Context) (bool, error) {
 			client := &http.Client{Timeout: tlsClientTimeout}

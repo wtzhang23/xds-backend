@@ -36,6 +36,7 @@ type K8sClient struct {
 	gatewayClient gatewayclient.Interface
 	config        *rest.Config
 	mapper        meta.RESTMapper
+	kubeconfigPath string
 	logger        testLogger
 }
 
@@ -72,8 +73,14 @@ func NewK8sClient(kubeconfigPath string) (*K8sClient, error) {
 		gatewayClient: gatewayClient,
 		config:        config,
 		mapper:        mapper,
+		kubeconfigPath: kubeconfigPath,
 		logger:        defaultLogger,
 	}, nil
+}
+
+// GetKubeconfigPath returns the kubeconfig path used by this client
+func (k *K8sClient) GetKubeconfigPath() string {
+	return k.kubeconfigPath
 }
 
 // SetLogger sets a custom logger for the client

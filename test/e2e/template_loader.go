@@ -41,16 +41,16 @@ type BackendRef struct {
 }
 
 type HTTPRouteTemplate struct {
-	HTTPRouteName          string
-	GatewayName            string
-	EnvoyGatewayNamespace  string
-	HTTPRoutePathPrefix    string
+	HTTPRouteName         string
+	GatewayName           string
+	EnvoyGatewayNamespace string
+	HTTPRoutePathPrefix   string
 	// For single backendRef
 	XdsBackendGroup        string
 	XdsBackendKind         string
 	XdsBackendResourceName string
 	// For multiple backendRefs
-	BackendRefs            []BackendRef
+	BackendRefs []BackendRef
 }
 
 type XdsBackendTemplate struct {
@@ -103,10 +103,6 @@ type FileXdsServerConfigMapTemplate struct {
 	TlsCaCertPEM               string
 	TlsCaCertName              string
 }
-
-// FileXdsServerConfigMapMultipleBackendsTemplate is an alias for FileXdsServerConfigMapTemplate
-// Kept for backward compatibility during migration
-type FileXdsServerConfigMapMultipleBackendsTemplate FileXdsServerConfigMapTemplate
 
 type ServiceEndpoint struct {
 	ServiceName string
